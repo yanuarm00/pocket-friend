@@ -19,15 +19,13 @@ class AiStackTest {
         return Prefs(ctx, ctx.getSharedPreferences("test_ai", Context.MODE_PRIVATE))
     }
 
-    @Test fun grokUsesXaiForEverything() {
+    @Test fun grokIsHiddenSoAppIsQwenOnly() {
         val p = prefs(); p.llmProvider = "grok"; p.xaiKey = "k"
-        assertEquals(AiStack("xai", "grok", "xai"), aiStack(p))
+        assertEquals("qwen", p.llmProvider); assertEquals("qwen", aiStack(p).chat)
+        assertEquals(listOf("qwen"), AiProviders.visible.map { it.id }); assertTrue(AiProviders.ALL.any { it.id == "grok" })
     }
 
-    @Test fun grokWithoutKeyFallsBackToSystemVoice() {
-        val p = prefs(); p.llmProvider = "grok"; p.xaiKey = ""
-        assertEquals(AiStack("system", "grok", "system"), aiStack(p))
-    }
+    @Test fun qwenModelListHasDefault() = assertEquals(Prefs.QWEN_MODEL, AiProviders.QWEN_MODELS.first().id)
 
     @Test fun qwenNeverTouchesXai() {
         val p = prefs(); p.llmProvider = "qwen"; p.xaiKey = "k"; p.qwenKey = "q"; p.sttProvider = "xai"; p.ttsProvider = "xai"

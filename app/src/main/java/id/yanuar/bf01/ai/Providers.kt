@@ -124,7 +124,7 @@ class XaiChat(private val prefs: Prefs, private val base: String = Xai.BASE) : C
     override suspend fun chat(system: String, history: List<Pair<String, String>>, user: String): String {
         if (prefs.xaiKey.isBlank()) throw AiError(AiFail.NO_KEY, "Grok")
         val req = chatBody(prefs.chatModel, system, history, user)
-        val res = Xai.call(Request.Builder().url("$base/chat/completions").header("Authorization", "Bearer ${prefs.xaiKey}")
+        val res = Xai.call(Request.Builder().url(QwenUrl.chatUrl(base)).header("Authorization", "Bearer ${prefs.xaiKey}")
             .post(req.toString().toRequestBody("application/json".toMediaType())).build())
         return chatReply("Grok", res)
     }
@@ -153,7 +153,7 @@ class QwenChat(private val prefs: Prefs) : ChatProvider {
 
 internal suspend fun <T> qwenWithRegion(prefs: Prefs, block: suspend (String) -> T): T {
     if (prefs.qwenKey.isBlank()) throw AiError(AiFail.NO_KEY, "Qwen")
-    val first = prefs.qwenBaseUrl.trimEnd('/')
+    val first = QwenUrl.normalize(prefs.qwenBaseUrl) ?: prefs.qwenBaseUrl.trimEnd('/')
     val other = when (first) { Prefs.QWEN_BASE_INTL -> Prefs.QWEN_BASE_CN; Prefs.QWEN_BASE_CN -> Prefs.QWEN_BASE_INTL; else -> null }
     return try { block(first) } catch (e: AiError) {
         if (e.kind != AiFail.BAD_KEY || other == null) throw e
@@ -162,8 +162,7 @@ internal suspend fun <T> qwenWithRegion(prefs: Prefs, block: suspend (String) ->
     }
 }
 
-fun qwenRegionName(base: String): String = when (base.trimEnd('/')) {
-    Prefs.QWEN_BASE_INTL -> "International (Singapore)"; Prefs.QWEN_BASE_CN -> "China (Beijing)"; else -> "Custom URL" }
+fun qwenRegionName(base: String): String = QwenUrl.regionName(base)
 
 /** Choose the AI brain from Settings. */
 fun chatProvider(prefs: Prefs): ChatProvider = if (prefs.llmProvider == "qwen") QwenChat(prefs) else XaiChat(prefs)
@@ -171,7 +170,7 @@ fun chatProvider(prefs: Prefs): ChatProvider = if (prefs.llmProvider == "qwen") 
 /** "Test key": one tiny chat request. Returns a line to show, e.g. "Connected · Qwen · International (Singapore)". */
 suspend fun testKey(prefs: Prefs, provider: ChatProvider = chatProvider(prefs)): Result<String> = runCatching {
     provider.chat("Reply with one word: OK", emptyList(), "ping")
-    if (prefs.llmProvider == "qwen") "Connected · Qwen · ${qwenRegionName(prefs.qwenBaseUrl)} · ${prefs.qwenModel}"
+    if (prefs.llmProvider == "qwen") "Connected · Qwen · ${qwenRegionName(prefs.qwenBaseUrl)} · ${prefs.qwenModel} · ${QwenUrl.host(prefs.qwenBaseUrl)}"
     else "Connected · Grok · ${prefs.chatModel}"
 }
 
@@ -196,7 +195,7 @@ class QwenStt(private val prefs: Prefs) : SttProvider {
     override suspend fun transcribe(pcm16k: ShortArray): String {
         val body = body(Audio.wav(pcm16k)).toString()
         return qwenWithRegion(prefs) { base ->
-            val r = Request.Builder().url("$base/chat/completions").header("Authorization", "Bearer ${prefs.qwenKey}")
+            val r = Request.Builder().url(QwenUrl.chatUrl(base)).header("Authorization", "Bearer ${prefs.qwenKey}")
                 .post(body.toRequestBody("application/json".toMediaType())).build()
             parse(String(Xai.call(r, "Qwen")))
         }

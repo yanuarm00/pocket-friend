@@ -68,6 +68,15 @@ class AiRequestTest {
         assertEquals(AiFail.BAD_KEY, e.kind); assertEquals(Prefs.QWEN_BASE_CN, p.qwenBaseUrl)
     }
 
+    @Test fun customWorkspaceUrlIsNeverOverridden() = runBlocking {
+        val p = prefs(); p.qwenBaseUrl = "https://ws-hqi4r1h4gr5qrj0f.ap-southeast-1.maas.aliyuncs.com/api/v1"
+        val ws = "https://ws-hqi4r1h4gr5qrj0f.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+        assertEquals(ws, p.qwenBaseUrl)
+        val tried = mutableListOf<String>()
+        val e = runCatching { qwenWithRegion(p) { b -> tried += b; throw AiError(AiFail.BAD_KEY, "Qwen", 401) } }.exceptionOrNull() as AiError
+        assertEquals(AiFail.BAD_KEY, e.kind); assertEquals(listOf(ws), tried); assertEquals(ws, p.qwenBaseUrl)
+    }
+
     @Test fun onlyQwenKeyMakesQwenActive() {
         val c = ApplicationProvider.getApplicationContext<Context>()
         c.getSharedPreferences("bf01", Context.MODE_PRIVATE).edit().remove("llm").commit()

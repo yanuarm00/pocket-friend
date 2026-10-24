@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.*
@@ -433,7 +434,8 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
     val scope = rememberCoroutineScope(); var busy by remember { mutableStateOf(false) }; var res by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     ActionButton(if (busy) "Testing…" else "Test key", enabled = !busy, icon = Sym.SmartToy) { busy = true; res = null
         scope.launch { val r = id.yanuar.bf01.ai.testKey(hub.prefs)
-            res = r.fold({ true to it }, { false to "Failed · " + id.yanuar.bf01.ai.friendlyError(it) }); busy = false; onDone() } }
+            res = r.fold({ true to it }, { false to "Failed · " + id.yanuar.bf01.ai.friendlyError(it) +
+                if (hub.prefs.llmProvider == "qwen") "\nTried: " + id.yanuar.bf01.ai.QwenUrl.host(hub.prefs.qwenBaseUrl) else "" }); busy = false; onDone() } }
     res?.let { (ok, t) -> Text(t, style = MaterialTheme.typography.bodyMedium,
         color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
 }
@@ -650,15 +652,15 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
         Section(stringResource(R.string.ask_memory)) {
             Toggle(stringResource(R.string.auto_mem), p.autoMemory, stringResource(R.string.auto_mem_desc, p.aiName)) { p.autoMemory = it; r++ }
         }
-        Section("Provider") {
+        val shown = id.yanuar.bf01.ai.AiProviders.visible
+        if (shown.size > 1) Section("Provider") {
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                listOf("grok" to "Grok", "qwen" to "Qwen").forEachIndexed { i, (id, label) ->
-                    SegmentedButton(p.llmProvider == id, { p.llmProvider = id; r++ }, SegmentedButtonDefaults.itemShape(i, 2),
+                shown.forEachIndexed { i, sp ->
+                    SegmentedButton(p.llmProvider == sp.id, { p.llmProvider = sp.id; r++ }, SegmentedButtonDefaults.itemShape(i, shown.size),
                         colors = SegmentedButtonDefaults.colors(inactiveContainerColor = androidx.compose.ui.graphics.Color.Transparent)) {
-                        Text(label, maxLines = 1, softWrap = false) } }
+                        Text(sp.label, maxLines = 1, softWrap = false) } }
             }
-            HelpNote("One choice for everything: speech recognition, chat, and BF's voice.",
-                "Grok is from xAI, Qwen from Alibaba. The chosen provider handles speech recognition (STT), the chat brain, and BF's voice when available.")
+            HelpNote("One choice for everything: speech recognition, chat, and BF's voice.")
         }
         if (p.llmProvider == "qwen") {
             var qk by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
@@ -672,11 +674,22 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
                 if (p.qwenKey.isNotBlank()) TestKeyRow(hub) { qb = p.qwenBaseUrl; r++ }
             }
             Section("Region & model") {
-                Row { FilterChip(qb == Prefs.QWEN_BASE_INTL, { qb = Prefs.QWEN_BASE_INTL; p.qwenBaseUrl = qb }, { Text("International") })
-                    Spacer(Modifier.width(8.dp)); FilterChip(qb == Prefs.QWEN_BASE_CN, { qb = Prefs.QWEN_BASE_CN; p.qwenBaseUrl = qb }, { Text("China") }) }
-                OutlinedTextField(qb, { qb = it; p.qwenBaseUrl = it }, Modifier.fillMaxWidth(), label = { Text("Base URL") }, shape = MaterialTheme.shapes.large)
-                HelpNote("The key must match the region. Test key finds the right region by itself.")
-                OutlinedTextField(qm, { qm = it; p.qwenModel = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Chat model") }, shape = MaterialTheme.shapes.large)
+                val custom = !id.yanuar.bf01.ai.QwenUrl.isPreset(qb)
+                fun setBase(v: String) { qb = v; p.qwenBaseUrl = v; if (!id.yanuar.bf01.ai.QwenUrl.isPreset(v) && v.isNotBlank()) p.qwenCustomUrl = p.qwenBaseUrl }
+                val nb = id.yanuar.bf01.ai.QwenUrl.normalize(qb)
+                val opts = listOf("Global" to (nb == Prefs.QWEN_BASE_INTL), "China" to (nb == Prefs.QWEN_BASE_CN), "Custom" to custom)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) { opts.forEachIndexed { i, (label, on) ->
+                    SegmentedButton(on, { when (i) { 0 -> setBase(Prefs.QWEN_BASE_INTL); 1 -> setBase(Prefs.QWEN_BASE_CN); else -> if (!custom) { qb = p.qwenCustomUrl; if (qb.isNotBlank()) p.qwenBaseUrl = qb } } },
+                        SegmentedButtonDefaults.itemShape(i, 3), icon = {},
+                        colors = SegmentedButtonDefaults.colors(inactiveContainerColor = androidx.compose.ui.graphics.Color.Transparent)) { Text(label, maxLines = 1, softWrap = false) } } }
+                OutlinedTextField(qb, { setBase(it) }, Modifier.fillMaxWidth(), label = { Text(if (custom) "Base URL (paste your workspace URL)" else "Base URL") },
+                    minLines = 2, shape = MaterialTheme.shapes.large,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                val norm = id.yanuar.bf01.ai.QwenUrl.normalize(qb)
+                if (norm == null) Text(if (qb.isBlank()) "Paste a Base URL, or pick a region." else "That doesn't look like a web address.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                else Text("Region: ${id.yanuar.bf01.ai.QwenUrl.regionName(norm)}\nChat & speech: $norm/chat/completions", style = MaterialTheme.typography.bodySmall)
+                HelpNote(if (custom) "A workspace URL is used exactly as entered. The key must come from that workspace." else "The key must match the region. Test key finds the right region by itself.")
+                ModelPicker(qm) { qm = it; p.qwenModel = it }
                 HelpNote("Speech recognition: ${QwenStt.MODEL} (Indonesian).")
             }
         } else {
@@ -850,4 +863,17 @@ interface CellScope { fun Modifier.cell(weight: Float): Modifier }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { val sc = object : CellScope { override fun Modifier.cell(weight: Float) = fillMaxWidth() }; sc.content() }
     else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { val rs = this
         val sc = object : CellScope { override fun Modifier.cell(weight: Float) = with(rs) { weight(weight) } }; sc.content() }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable fun ModelPicker(current: String, models: List<id.yanuar.bf01.ai.AiProviders.Model> = id.yanuar.bf01.ai.AiProviders.QWEN_MODELS, pick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val list = if (models.any { it.id == current }) models else models + id.yanuar.bf01.ai.AiProviders.Model(current, "$current (saved)")
+    ExposedDropdownMenuBox(open, { open = it }) {
+        OutlinedTextField(list.first { it.id == current }.label, {}, Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable), readOnly = true,
+            label = { Text("Chat model") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) }, shape = MaterialTheme.shapes.large)
+        ExposedDropdownMenu(open, { open = false }) {
+            list.forEach { m -> DropdownMenuItem({ Column { Text(m.label); Text(m.id, style = MaterialTheme.typography.bodySmall) } }, { pick(m.id); open = false }) }
+        }
+    }
 }

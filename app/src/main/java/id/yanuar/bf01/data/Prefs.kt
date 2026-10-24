@@ -29,8 +29,11 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
     var qwenKey: String get() = secret("qwen_key"); set(v) = secure.edit().putString("qwen_key", v.trim()).apply()
     /** Penyedia AI: "grok" (xAI) atau "qwen" (DashScope), dipakai untuk STT, chat, dan TTS. */
     /** If never chosen and only a Qwen key exists, Qwen is the active provider. */
-    var llmProvider: String get() = plain.getString("llm", null) ?: (if (qwenKey.isNotBlank() && xaiKey.isBlank()) "qwen" else "grok"); set(v) = plain.edit().putString("llm", v).apply()
-    var qwenBaseUrl: String get() = plain.getString("qwen_base", QWEN_BASE_INTL) ?: QWEN_BASE_INTL; set(v) = plain.edit().putString("qwen_base", v.trim().trimEnd('/')).apply()
+    var llmProvider: String get() = (plain.getString("llm", null) ?: (if (qwenKey.isNotBlank() && xaiKey.isBlank()) "qwen" else "grok"))
+        .let { if (id.yanuar.bf01.ai.AiProviders.isVisible(it)) it else id.yanuar.bf01.ai.AiProviders.visible.first().id }; set(v) = plain.edit().putString("llm", v).apply()
+    var qwenBaseUrl: String get() = plain.getString("qwen_base", QWEN_BASE_INTL) ?: QWEN_BASE_INTL; set(v) = plain.edit().putString("qwen_base", id.yanuar.bf01.ai.QwenUrl.normalize(v) ?: v.trim().trimEnd('/')).apply()
+    /** Last custom (workspace) Base URL, so the Custom chip can bring it back. */
+    var qwenCustomUrl: String get() = plain.getString("qwen_custom", "") ?: ""; set(v) = plain.edit().putString("qwen_custom", v).apply()
     var qwenModel: String get() = plain.getString("qwen_model", QWEN_MODEL) ?: QWEN_MODEL; set(v) = plain.edit().putString("qwen_model", v.trim()).apply()
     /** Token WebSocket; dibuat acak sekali, dikirim ke BF lewat Provision. */
     val wsToken: String get() = secure.getString("ws_token", null) ?: ByteArray(16).also { SecureRandom().nextBytes(it) }
