@@ -1,5 +1,9 @@
 package id.yanuar.bf01.svc
 
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -176,6 +180,38 @@ class Hub internal constructor(val ctx: Context, val prefs: Prefs = Prefs(ctx)) 
     }
 
     suspend fun sendNameCard() = ble.write(BfProtocol.NAMECARD, BfProtocol.nameCard(waLink(), prefs.cardName, prefs.cardTitle))
+
+    data class ProvResult(val ok: Boolean, val text: String)
+
+    /** Sends Wi-Fi + server to BF and follows BF's replies (prov:ok / prov:error / wifi:on / wifi:fail). */
+    suspend fun provisionWithStatus(step: (String) -> Unit): ProvResult = kotlinx.coroutines.coroutineScope {
+        val ssids = (0..1).map { prefs.wifi(it).first }.filter { it.isNotBlank() }
+        if (ssids.isEmpty()) return@coroutineScope ProvResult(false, "Add a Wi-Fi name first.")
+        if (ble.state.value != id.yanuar.bf01.ble.BleManager.State.READY)
+            return@coroutineScope ProvResult(false, "BF isn't connected. Connect BF first (press PWR if it's asleep), then try again.")
+        step("Sending to BF…")
+        val ack = async { kotlinx.coroutines.withTimeoutOrNull(12_000) { ble.events.first { it is BfProtocol.Event.ProvOk || it is BfProtocol.Event.ProvError } } }
+        kotlinx.coroutines.yield()
+        if (!provision()) { ack.cancel(); return@coroutineScope ProvResult(false, "Couldn't send over Bluetooth. Move closer to BF and try again.") }
+        when (val e = ack.await()) {
+            null -> return@coroutineScope ProvResult(true, "Sent. BF didn't confirm yet. Check BF's screen; it restarts after saving.")
+            is BfProtocol.Event.ProvError -> return@coroutineScope ProvResult(false,
+                if (e.why == "json") "BF couldn't read the settings. Try a shorter Wi-Fi name or password, then send again." else "BF rejected the settings (${e.why}).")
+            else -> {}
+        }
+        log("Provisioning saved, BF restarting")
+        step("Saved on BF. BF is restarting and trying ${ssids.joinToString(" / ") { "\"$it\"" }}…")
+        val r = kotlinx.coroutines.withTimeoutOrNull(75_000) {
+            kotlinx.coroutines.flow.merge(
+                ble.events.filter { it is BfProtocol.Event.WifiFail || it is BfProtocol.Event.WifiOn || it is BfProtocol.Event.WifiReady }.map { it !is BfProtocol.Event.WifiFail },
+                ble.info.filter { it?.wifiOn == true }.map { true }).first()
+        }
+        when (r) {
+            true -> ProvResult(true, "Done! BF is on Wi-Fi.")
+            false -> ProvResult(false, "BF couldn't join the Wi-Fi. Check the password, make sure it's 2.4 GHz (not 5 GHz only), and that the hotspot is on.")
+            null -> ProvResult(true, "Saved on BF. It will use this Wi-Fi when it needs it (for chat and file sync).")
+        }
+    }
 
     suspend fun provision(): Boolean {
         val profiles = (0..1).map { prefs.wifi(it) }.filter { it.first.isNotBlank() }.map { BfProtocol.WifiProfile(it.first, it.second) }

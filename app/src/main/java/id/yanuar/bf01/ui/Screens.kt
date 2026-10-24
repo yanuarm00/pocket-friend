@@ -151,11 +151,7 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
         }) { Text("Find & connect BF-01") }
         if (msg.isNotEmpty()) Text(msg)
         Spacer(Modifier.height(12.dp))
-        Section("Send Wi-Fi & server to BF") {
-            HelpNote("Fill in Wi-Fi in Settings › Connection & network first. BF restarts after saving.")
-            val scope = rememberCoroutineScope()
-            ActionButton("Send to BF", primary = true, icon = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send) { scope.launch { msg = if (hub.provision()) "Sent. BF will restart." else "Send failed. Make sure BF is connected." } }
-        }
+        SendToBf(hub)
         OutlinedButton(done, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Done") }
     }
 }
@@ -744,16 +740,8 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
             }
             HelpNote("Off = Bluetooth & Wi-Fi to BF are cut and won't reconnect automatically.")
         }
-        for (i in 0..1) {
-            val (s0, p0) = p.wifi(i); var s by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(s0) }; var pw by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p0) }
-            Section(if (i == 0) "Wi-Fi 1 (home)" else "Wi-Fi 2 (phone hotspot)") {
-                OutlinedTextField(s, { s = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Wi-Fi name (SSID)") }, shape = MaterialTheme.shapes.large,
-                    leadingIcon = { Icon(Sym.Wifi, null) })
-                OutlinedTextField(pw, { pw = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Password") }, visualTransformation = PasswordVisualTransformation(),
-                    shape = MaterialTheme.shapes.large, leadingIcon = { Icon(Sym.Key, null) })
-                ActionButton("Save", icon = Sym.Save) { p.setWifi(i, s, pw) }
-            }
-        }
+        WifiSlot(hub, 0); WifiSlot(hub, 1)
+        SendToBf(hub)
         Section("Server on the phone") {
             var host by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.serverHost) }
             OutlinedTextField(host, { host = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Phone IP as seen by BF") }, shape = MaterialTheme.shapes.large,
