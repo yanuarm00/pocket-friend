@@ -28,7 +28,7 @@ interface TtsProvider { suspend fun speak(text: String): ShortArray }
 open class ApiException(msg: String) : Exception(msg)
 
 /** Why an AI call failed, in words a person understands. The key is never part of the message. */
-enum class AiFail { NO_KEY, BAD_KEY, NO_INTERNET, TIMEOUT, QUOTA, BAD_MODEL, DOWN, BAD_REPLY, OTHER }
+enum class AiFail { NO_KEY, BAD_KEY, NO_INTERNET, TIMEOUT, QUOTA, BAD_MODEL, NOT_ACTIVATED, DOWN, BAD_REPLY, OTHER }
 class AiError(val kind: AiFail, val provider: String, val code: Int = 0, detail: String = "") :
     ApiException("$provider ${kind.name}${if (code > 0) " $code" else ""}${if (detail.isNotBlank()) ": $detail" else ""}")
 
@@ -43,6 +43,7 @@ fun friendlyError(e: Throwable): String {
         AiFail.TIMEOUT -> "$p took too long to answer. Try again."
         AiFail.QUOTA -> "$p says the quota or balance has run out, or too many requests. Check your $p account."
         AiFail.BAD_MODEL -> "$p doesn't know the chat model name. Check the model in Settings > AI provider."
+        AiFail.NOT_ACTIVATED -> "Your Alibaba account hasn't activated this model yet (verification pending or no plan). Try another model or finish activation in Model Studio."
         AiFail.DOWN -> "$p is having problems right now (error ${a.code}). Try again in a bit."
         AiFail.BAD_REPLY -> "$p sent back an empty or unreadable reply. Try again."
         AiFail.OTHER -> "Something went wrong talking to $p${if (a.code > 0) " (error ${a.code})" else ""}."
@@ -61,6 +62,7 @@ internal fun classify(provider: String, e: Throwable): AiError = when (e) {
 internal fun httpFail(provider: String, code: Int, body: String): AiError {
     val b = body.lowercase()
     val kind = when {
+        code == 403 && "unpurchased" in b -> AiFail.NOT_ACTIVATED
         code == 401 || code == 403 || "invalidapikey" in b || "incorrect api key" in b -> AiFail.BAD_KEY
         code == 429 || code == 402 || "quota" in b || "arrearage" in b || "insufficient" in b -> AiFail.QUOTA
         code == 404 || "model" in b && ("not found" in b || "not exist" in b || "does not exist" in b) -> AiFail.BAD_MODEL
@@ -182,22 +184,40 @@ suspend fun testKey(prefs: Prefs, provider: ChatProvider = chatProvider(prefs)):
 class QwenStt(private val prefs: Prefs) : SttProvider {
     companion object {
         const val MODEL = "qwen3-asr-flash"
-        fun body(wav: ByteArray): JSONObject {
+        fun isNative(model: String) = model.startsWith("qwen-audio")
+        private fun content(wav: ByteArray): JSONArray {
             val data = "data:audio/wav;base64," + java.util.Base64.getEncoder().encodeToString(wav)
-            val content = JSONArray().put(JSONObject().put("type", "input_audio").put("input_audio", JSONObject().put("data", data)))
-            return JSONObject().put("model", MODEL).put("stream", false)
-                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
-                .put("asr_options", JSONObject().put("language", "id").put("enable_itn", false))
+            return JSONArray().put(JSONObject().put("type", "input_audio").put("input_audio", JSONObject().put("data", data)))
         }
-        fun parse(res: String): String =
-            JSONObject(res).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
+        private fun msgs(wav: ByteArray) = JSONArray().put(JSONObject().put("role", "user").put("content", content(wav)))
+        /** OpenAI-compatible body (qwen3-asr-flash): POST {base}/chat/completions. */
+        fun body(wav: ByteArray, model: String = MODEL): JSONObject = JSONObject().put("model", model).put("stream", false)
+            .put("messages", msgs(wav)).put("asr_options", JSONObject().put("language", "id").put("enable_itn", false))
+        /** Native body (qwen-audio-3.0-asr-flash): POST /api/v1/services/aigc/multimodal-generation/generation. */
+        fun nativeBody(wav: ByteArray, model: String): JSONObject = JSONObject().put("model", model)
+            .put("input", JSONObject().put("messages", msgs(wav)))
+            .put("parameters", JSONObject().put("format", "wav").put("sample_rate", "16000")
+                .put("asr_options", JSONObject().put("language", "id").put("enable_itn", false)))
+        fun parse(res: String): String {
+            val j = JSONObject(res)
+            val msg = (j.optJSONObject("output")?.getJSONArray("choices") ?: j.getJSONArray("choices")).getJSONObject(0).getJSONObject("message")
+            val c = msg.opt("content")
+            return when (c) {
+                is JSONArray -> (0 until c.length()).joinToString("") { c.getJSONObject(it).optString("text") }
+                else -> msg.optString("content")
+            }.trim()
+        }
     }
     override suspend fun transcribe(pcm16k: ShortArray): String {
-        val body = body(Audio.wav(pcm16k)).toString()
+        val model = prefs.qwenAsrModel
+        val wav = Audio.wav(pcm16k)
+        val native = isNative(model)
+        val body = (if (native) nativeBody(wav, model) else body(wav, model)).toString()
         return qwenWithRegion(prefs) { base ->
-            val r = Request.Builder().url(QwenUrl.chatUrl(base)).header("Authorization", "Bearer ${prefs.qwenKey}")
-                .post(body.toRequestBody("application/json".toMediaType())).build()
-            parse(String(Xai.call(r, "Qwen")))
+            val url = if (native) QwenUrl.nativeMultimodalUrl(base) else QwenUrl.chatUrl(base)
+            val b = Request.Builder().url(url).header("Authorization", "Bearer ${prefs.qwenKey}")
+            if (native) b.header("X-DashScope-SSE", "disable")
+            parse(String(Xai.call(b.post(body.toRequestBody("application/json".toMediaType())).build(), "Qwen")))
         }
     }
 }

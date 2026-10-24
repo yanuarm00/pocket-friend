@@ -34,6 +34,7 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
     var qwenBaseUrl: String get() = plain.getString("qwen_base", QWEN_BASE_INTL) ?: QWEN_BASE_INTL; set(v) = plain.edit().putString("qwen_base", id.yanuar.bf01.ai.QwenUrl.normalize(v) ?: v.trim().trimEnd('/')).apply()
     /** Last custom (workspace) Base URL, so the Custom chip can bring it back. */
     var qwenCustomUrl: String get() = plain.getString("qwen_custom", "") ?: ""; set(v) = plain.edit().putString("qwen_custom", v).apply()
+    var qwenAsrModel: String get() = plain.getString("qwen_asr", QWEN_ASR) ?: QWEN_ASR; set(v) = plain.edit().putString("qwen_asr", v.trim()).apply()
     var qwenModel: String get() = plain.getString("qwen_model", QWEN_MODEL) ?: QWEN_MODEL; set(v) = plain.edit().putString("qwen_model", v.trim()).apply()
     /** Token WebSocket; dibuat acak sekali, dikirim ke BF lewat Provision. */
     val wsToken: String get() = secure.getString("ws_token", null) ?: ByteArray(16).also { SecureRandom().nextBytes(it) }
@@ -94,7 +95,8 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
         // disarankan docs dan bisa diisi manual di Pengaturan.
         const val QWEN_BASE_INTL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" // Singapura (internasional)
         const val QWEN_BASE_CN = "https://dashscope.aliyuncs.com/compatible-mode/v1"        // Beijing (China)
-        const val QWEN_MODEL = "qwen-plus"
+        const val QWEN_MODEL = "qwen3.8-flash"
+        const val QWEN_ASR = "qwen-audio-3.0-asr-flash"
         const val GROK_MODEL = "grok-4.3"
         const val DEFAULT_PERSONA = "Kamu BF, sahabat dekat yang lincah dan ceria. Panggil pengguna \"Mas Yan\". " +
             "Bicara bahasa Indonesia santai seperti teman akrab. Jawab singkat, 1 sampai 3 kalimat, tanpa daftar atau emoji."

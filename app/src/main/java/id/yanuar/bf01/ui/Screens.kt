@@ -116,6 +116,7 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
         }
         if (hub.findPhone.ringing) Button({ hub.findPhone.stop() }, Modifier.fillMaxWidth()) { Text("Stop phone ringing") }
         Section("Log") { log.takeLast(5).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+        VersionFooter(small = true)
     }
 }
 
@@ -593,8 +594,15 @@ fun notifAccessGranted(ctx: android.content.Context): Boolean =
             NavDivider()
             NavRow(Sym.BarChart, "Usage & about", "${usage?.let { "%.0f".format(it.first + it.second) } ?: "–"} min of audio this month · v${appVersion(ctx)}") { open(Screen.SetPemakaian) }
         }
+        VersionFooter()
     }
 }
+
+/** App version from BuildConfig, e.g. "Pocket Friend v0.3.7". */
+const val APP_VERSION_LABEL = "Pocket Friend v" + id.yanuar.bf01.BuildConfig.VERSION_NAME
+@Composable fun VersionFooter(small: Boolean = false) =
+    Text(APP_VERSION_LABEL, Modifier.fillMaxWidth().padding(vertical = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        style = if (small) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 fun appVersion(ctx: android.content.Context): String = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
 
@@ -690,7 +698,9 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
                 else Text("Region: ${id.yanuar.bf01.ai.QwenUrl.regionName(norm)}\nChat & speech: $norm/chat/completions", style = MaterialTheme.typography.bodySmall)
                 HelpNote(if (custom) "A workspace URL is used exactly as entered. The key must come from that workspace." else "The key must match the region. Test key finds the right region by itself.")
                 ModelPicker(qm) { qm = it; p.qwenModel = it }
-                HelpNote("Speech recognition: ${QwenStt.MODEL} (Indonesian).")
+                var am by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.qwenAsrModel) }
+                ModelPicker(am, id.yanuar.bf01.ai.AiProviders.QWEN_ASR_MODELS, "Speech model") { am = it; p.qwenAsrModel = it }
+                HelpNote("Speech is recognised in Indonesian. Both models need to be active on your Alibaba account.")
             }
         } else {
             var model by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.chatModel) }
@@ -866,12 +876,12 @@ interface CellScope { fun Modifier.cell(weight: Float): Modifier }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable fun ModelPicker(current: String, models: List<id.yanuar.bf01.ai.AiProviders.Model> = id.yanuar.bf01.ai.AiProviders.QWEN_MODELS, pick: (String) -> Unit) {
+@Composable fun ModelPicker(current: String, models: List<id.yanuar.bf01.ai.AiProviders.Model> = id.yanuar.bf01.ai.AiProviders.QWEN_MODELS, title: String = "Chat model", pick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val list = if (models.any { it.id == current }) models else models + id.yanuar.bf01.ai.AiProviders.Model(current, "$current (saved)")
     ExposedDropdownMenuBox(open, { open = it }) {
         OutlinedTextField(list.first { it.id == current }.label, {}, Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable), readOnly = true,
-            label = { Text("Chat model") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) }, shape = MaterialTheme.shapes.large)
+            label = { Text(title) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) }, shape = MaterialTheme.shapes.large)
         ExposedDropdownMenu(open, { open = false }) {
             list.forEach { m -> DropdownMenuItem({ Column { Text(m.label); Text(m.id, style = MaterialTheme.typography.bodySmall) } }, { pick(m.id); open = false }) }
         }

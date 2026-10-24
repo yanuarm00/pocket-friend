@@ -34,7 +34,7 @@ class AiRequestTest {
         assertEquals("Halo", chat(prefs()).chat("s", emptyList(), "hi"))
         val req = srv.takeRequest()
         assertEquals("/compatible-mode/v1/chat/completions", req.path)
-        assertEquals("qwen-plus", org.json.JSONObject(req.body.readUtf8()).getString("model"))
+        assertEquals(Prefs.QWEN_MODEL, org.json.JSONObject(req.body.readUtf8()).getString("model"))
     }
 
     @Test fun errorsAreClassified() = runBlocking {

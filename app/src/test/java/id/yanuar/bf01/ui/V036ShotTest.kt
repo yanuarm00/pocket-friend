@@ -34,7 +34,7 @@ class V036ShotTest {
         prefs.deviceAddress = "AA:BB:CC:DD:4E:27"; prefs.setWifi(0, "Rumah Yan", "rahasia123"); prefs.setWifi(1, "", "")
         return Hub(ctx, prefs)
     }
-    private fun out(n: String, fs: Float) = "/workspace/pf_v036/shots/${n}_fs${(fs * 100).toInt()}.png"
+    private fun out(n: String, fs: Float) = "/workspace/pf_v037/shots/${n}_fs${(fs * 100).toInt()}.png"
     private fun page(n: String, fs: Float = 1.15f, act: () -> Unit = {}) {
         RuntimeEnvironment.setFontScale(fs); val h = hub()
         rule.setContent { PocketFriendTheme(true) { App(h, Screen.SetJaringan) } }
@@ -51,5 +51,11 @@ class V036ShotTest {
         repeat(3) { rule.onRoot().performTouchInput { swipeUp(startY = bottom * 0.8f, endY = top + 100f) }; rule.waitForIdle() }; rule.onRoot().captureRoboImage(out(n, fs)) }
     @Test fun custom() = ai("Qwen_custom_url", 1.15f, "https://ws-hqi4r1h4gr5qrj0f.ap-southeast-1.maas.aliyuncs.com/api/v1")
     @Test fun custom130() = ai("Qwen_custom_url", 1.3f, "https://ws-hqi4r1h4gr5qrj0f.ap-southeast-1.maas.aliyuncs.com/api/v1")
+    private fun ver(n: String, sc: Screen, fs: Float) { RuntimeEnvironment.setFontScale(fs); val h = hub()
+        rule.setContent { PocketFriendTheme(true) { App(h, sc) } }; rule.waitForIdle()
+        repeat(4) { rule.onRoot().performTouchInput { swipeUp(startY = bottom * 0.8f, endY = top + 100f) }; rule.waitForIdle() }
+        rule.onNodeWithText(APP_VERSION_LABEL).assertExists(); rule.onRoot().captureRoboImage(out(n, fs)) }
+    @Test fun settingsVersion() = ver("Settings_version", Screen.Pengaturan, 1.3f)
+    @Test fun homeVersion() = ver("Home_version", Screen.Beranda, 1.15f)
     @Test fun intl() = ai("Qwen_international", 1.15f, "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
 }

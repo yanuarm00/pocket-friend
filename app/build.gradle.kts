@@ -16,8 +16,8 @@ android {
         applicationId = "id.yanuarmoo.pocketfriend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 18
-        versionName = "0.3.6"
+        versionCode = 19
+        versionName = "0.3.7"
     }
     // Signing rilis: dibaca dari env (PF_KEYSTORE, PF_KEYSTORE_PASSWORD, PF_KEY_ALIAS, PF_KEY_PASSWORD)
     // atau dari local.properties (pf.keystore, pf.keystorePassword, pf.keyAlias, pf.keyPassword). Rahasia TIDAK di repo.
@@ -39,7 +39,7 @@ android {
             signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

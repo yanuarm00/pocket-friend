@@ -32,6 +32,8 @@ object QwenUrl {
 
     fun host(base: String): String = base.substringAfter("://").substringBefore('/')
     fun chatUrl(base: String) = (normalize(base) ?: base.trimEnd('/')) + "/chat/completions"
+    /** Native DashScope multimodal endpoint (qwen-audio-* ASR): https://host/api/v1/services/aigc/multimodal-generation/generation */
+    fun nativeMultimodalUrl(base: String) = (normalize(base) ?: base.trimEnd('/')).removeSuffix("/compatible-mode/v1") + "/api/v1/services/aigc/multimodal-generation/generation"
     fun isPreset(base: String) = normalize(base).let { it == Prefs.QWEN_BASE_INTL || it == Prefs.QWEN_BASE_CN }
 
     private val regions = mapOf("cn-beijing" to "China (Beijing)", "ap-southeast-1" to "Singapore", "us-east-1" to "US (Virginia)",
@@ -48,7 +50,7 @@ object QwenUrl {
             h.endsWith(".maas.aliyuncs.com") -> {
                 val parts = h.removeSuffix(".maas.aliyuncs.com").split('.')
                 val r = regions[parts.last()] ?: parts.last()
-                if (parts.size >= 2 && parts.first() == "trial") "$r · trial" else "$r · workspace"
+                if (parts.size >= 2 && parts.first() == "trial") "$r · trial" else if (parts.size >= 2 && parts.first() == "token-plan") "$r · Token Plan (sk-sp- key)" else "$r · workspace"
             }
             else -> "Custom URL"
         }
