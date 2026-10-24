@@ -1,0 +1,14 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+*.keystore
+*.jks
+secrets.properties
+
+# Rahasia signing
+/secrets/
+*.env
+pocket-friend-signing*
+*.p12

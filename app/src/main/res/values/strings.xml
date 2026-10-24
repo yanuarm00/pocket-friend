@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pocket Friend</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_ask">Ask AI</string>
+    <string name="nav_todo">To-do</string>
+    <string name="nav_notes">Notes</string>
+    <string name="nav_settings">Settings</string>
+    <string name="back">Back</string>
+
+    <!-- Screen titles -->
+    <string name="t_pairing">Pairing</string>
+    <string name="t_tasks">To-do</string>
+    <string name="t_card">Name card</string>
+    <string name="t_menu">BF menu</string>
+    <string name="t_file">Recordings</string>
+    <string name="t_ai">AI provider</string>
+    <string name="t_voice">BF &amp; voice</string>
+    <string name="t_network">Connection &amp; network</string>
+    <string name="t_perms">Notifications &amp; permissions</string>
+    <string name="t_device">Device</string>
+    <string name="t_usage">Usage &amp; about</string>
+    <string name="t_firmware">Firmware update</string>
+
+    <!-- Connection status -->
+    <string name="pill_on">BF ON</string>
+    <string name="pill_connecting">Connecting…</string>
+    <string name="pill_off">BF OFF</string>
+    <string name="status_cd">Status %1$s. Tap for details</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_connecting">Connecting</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_on_note">BF is ready to chat.</string>
+    <string name="status_connecting_note">Waiting for BF. Press PWR on BF if it is asleep.</string>
+    <string name="status_off_note">BF stays disconnected until you tap Reconnect.</string>
+    <string name="battery">Battery</string>
+    <string name="firmware_x">Firmware %1$s</string>
+    <string name="reconnect">Reconnect</string>
+    <string name="disconnect">Disconnect</string>
+
+    <!-- Home -->
+    <string name="home_sync">Sync</string>
+    <string name="home_reload">Reload</string>
+
+    <!-- Ask BF -->
+    <string name="ask_hello">Hi Mas Yan! 👋</string>
+    <string name="ask_intro">I\'m %1$s. Ask me anything: your schedule, ideas, or just how your day went. Where do we start?</string>
+    <string name="ask_s1">What\'s on my schedule today?</string>
+    <string name="ask_s2">Give me content ideas for this week</string>
+    <string name="ask_s3">Remind me to drink water</string>
+    <string name="ask_persona_title">%1$s persona &amp; memory</string>
+    <string name="ask_persona_sub">How %2$s talks &amp; what %2$s remembers · %1$s</string>
+    <string name="ask_persona">Persona</string>
+    <string name="ask_default">Default</string>
+    <string name="ask_memory">Memory</string>
+    <string name="ask_memory_empty">No memories yet. Add one here, or chat a bit: %1$s picks up lasting things about you (likes, habits, plans, people, projects) automatically. You can turn that off in Settings → AI.</string>
+    <string name="ask_memory_auto">auto · from %1$s</string>
+    <string name="ask_memory_from_chat">chat</string>
+    <string name="ask_memory_from_note">voice note</string>
+    <string name="auto_mem">Remember things automatically</string>
+    <string name="auto_mem_desc">After a chat or a voice note, %1$s saves up to 3 lasting facts about you. Keys, passwords and card numbers are never saved. Max 200 memories; oldest auto ones go first.</string>
+    <string name="ask_memory_delete">Delete memory</string>
+    <string name="ask_memory_add">Add a memory</string>
+    <string name="ask_clear">Clear chat</string>
+    <string name="ask_clear_q">Clear the whole chat?</string>
+    <string name="ask_clear_note">%1$s\'s persona and memories are kept.</string>
+    <string name="ask_hint">Ask %1$s…</string>
+    <string name="send">Send</string>
+
+    <!-- Recordings -->
+    <string name="rec_status_none">All recordings are on the phone</string>
+    <string name="rec_status_n">%1$d recordings not on phone yet</string>
+    <string name="rec_sync">Sync recordings</string>
+    <string name="rec_last">Last sync %1$s</string>
+    <string name="rec_never">Never synced yet</string>
+    <string name="rec_how">Bluetooth carries small data. For recordings, BF turns on Wi-Fi briefly, then off again.</string>
+    <string name="rec_how_detail">BF joins the Wi-Fi you sent during pairing (home Wi-Fi or your phone hotspot). The phone must be on that same network. Sync runs by itself after each recording, or when BF connects. It waits if BF battery is under 30% and not charging; the Sync button always runs.</string>
+    <string name="rec_advanced">Advanced</string>
+    <string name="file_tf">Memory card on BF</string>
+    <string name="file_tf_desc">Recordings on BF\'s memory card, read over Bluetooth. Only recordings already on the phone get removed when the card is full.</string>
+    <string name="file_tf_read">Read file list</string>
+    <string name="file_export">Export</string>
+    <string name="file_export_desc">Saves your notes and to-dos as one Markdown text file.</string>
+    <string name="file_export_md">Export Markdown</string>
+    <string name="ai_name">AI name</string>
+    <string name="ai_name_desc">What you call your AI. Used across the app and in its persona.</string>
+
+    <!-- Common -->
+    <string name="save">Save</string>
+    <string name="add">Add</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="expand">Expand</string>
+    <string name="collapse">Collapse</string>
+</resources>

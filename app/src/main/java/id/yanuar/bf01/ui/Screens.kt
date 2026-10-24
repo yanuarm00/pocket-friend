@@ -1,0 +1,748 @@
+package id.yanuar.bf01.ui
+
+import androidx.compose.foundation.lazy.items
+import android.annotation.SuppressLint
+import android.bluetooth.le.ScanResult
+import android.companion.AssociationRequest
+import android.companion.BluetoothLeDeviceFilter
+import android.companion.CompanionDeviceManager
+import android.content.Intent
+import android.content.IntentSender
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.draw.clip
+import id.yanuar.bf01.R
+import id.yanuar.bf01.ai.ModeCepat
+import id.yanuar.bf01.ai.QwenStt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import id.yanuar.bf01.ble.BfProtocol
+import id.yanuar.bf01.ble.BleManager
+import id.yanuar.bf01.data.Prefs
+import id.yanuar.bf01.svc.BfService
+import id.yanuar.bf01.svc.Hub
+import id.yanuar.bf01.svc.PairingReceiver
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.regex.Pattern
+
+private val fmt = SimpleDateFormat("d MMM HH.mm", Locale("id", "ID"))
+private val fmtClock = SimpleDateFormat("HH.mm", Locale.US)
+private val fmtDate = SimpleDateFormat("EEE, dd/MM/yy", Locale.US)
+private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable fun BerandaScreen(hub: Hub) {
+    val st by hub.ble.state.collectAsState(); val info by hub.ble.info.collectAsState(); val log by hub.log.collectAsState()
+    val scope = rememberCoroutineScope(); val ctx = LocalContext.current; val rev by hub.revision.collectAsState()
+    // Baca DB & kalender saat komposisi pertama (belum ada di layar saat frame pertama = stutter).
+    val a = rememberLoaded(hub, "beranda", rev) { id.yanuar.bf01.svc.CalendarSource.todayLines(ctx) to hub.db.tasks().filter { !it.done } }
+    val agenda = a?.first; val tasks = a?.second
+    val today = (agenda ?: emptyList()) + (tasks ?: emptyList()).map { "• ${it.title}" }
+    val now = remember { Date() }
+
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        BubbleCard(Modifier.fillMaxWidth(), tail = 22.dp) {
+            DotText(fmtClock.format(now), Dot.XL, 2.6f)
+            Spacer(Modifier.height(16.dp))
+            DotPill("TODAY", head = false)  // tanpa kepala tak terlihat: teks benar-benar di tengah
+            Spacer(Modifier.height(12.dp))
+            if (today.isEmpty()) Text("Nothing today. Take it easy.", style = MaterialTheme.typography.bodyLarge)
+            today.take(4).forEach { Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 3.dp)) }
+            if (today.size > 4) Text("+${today.size - 4} more", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                DotText(fmtDate.format(now), Dot.S, 1.05f, modifier = Modifier.weight(1f, false))
+                Spacer(Modifier.weight(1f)); BatteryDots(info?.batt?.takeIf { it >= 0 })
+            }
+        }
+        val ready = st == BleManager.State.READY
+        val linked by hub.linked.collectAsState()
+        Section("Device") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val bs = rememberBfStatus(hub); BfFace(44.dp, bs.mood, bs.filled, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    DotText(linkLabel(linked, st), Dot.S, 1.1f)
+                    Spacer(Modifier.height(6.dp))
+                    HelpNote(if (!linked) "BF stays disconnected until you tap Connect."
+                        else if (ready) "BF is ready to chat" else "Waiting for BF. Press PWR on BF if it is asleep.")
+                }
+                info?.batt?.takeIf { it >= 0 }?.let { DotText("$it%", Dot.L, 1.2f) }
+            }
+            info?.let { i -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip({}, { Text("FW ${i.fw}") })
+                AssistChip({}, { Text(if (i.sd) "Memory card ${"%.1f".format(i.sdFreeMb / 1024f)} GB free" else "No memory card") })
+                AssistChip({}, { Text(if (i.wifiOn) "Wi-Fi on" else "Wi-Fi off") })
+            } }
+            if (linked) HelpNote(if (hub.server.clients > 0) "Phone server: BF is chatting" else "Phone server ready on port 8000")
+            LinkToggle(hub, linked)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ActionButton(stringResource(R.string.home_sync), Modifier.weight(1f), enabled = ready, icon = Sym.CloudSync) { scope.launch { hub.syncAll() } }
+                ActionButton(stringResource(R.string.home_reload), Modifier.weight(1f), enabled = linked, icon = Sym.Refresh) { scope.launch { hub.ble.refreshInfo() } }
+            }
+            if (linked && !ready) HelpNote("Sync is available once BF is connected.")
+        }
+        if (hub.findPhone.ringing) Button({ hub.findPhone.stop() }, Modifier.fillMaxWidth()) { Text("Stop phone ringing") }
+        Section("Log") { log.takeLast(5).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+    }
+}
+
+@SuppressLint("MissingPermission")
+@Composable fun PairingScreen(hub: Hub, done: () -> Unit) {
+    val ctx = LocalContext.current; var code by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }; var msg by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
+        @Suppress("DEPRECATION")
+        val sr: ScanResult? = r.data?.getParcelableExtra(CompanionDeviceManager.EXTRA_DEVICE)
+        val dev = sr?.device ?: return@rememberLauncherForActivityResult
+        hub.prefs.deviceAddress = dev.address; hub.prefs.deviceName = sr.scanRecord?.deviceName ?: ""
+        if (Build.VERSION.SDK_INT >= 31) runCatching { ctx.getSystemService(CompanionDeviceManager::class.java).startObservingDevicePresence(dev.address) }
+        PairingReceiver.pendingCode = runCatching { BfProtocol.passkeyString(code) }.getOrNull()
+        hub.ble.bond(dev.address)
+        hub.prefs.linkEnabled = true; hub.linked.value = true; BfService.start(ctx); hub.ble.connect(dev.address)
+        msg = "Picked ${hub.prefs.deviceName}. If Android asks for a PIN/passkey, type ${PairingReceiver.pendingCode ?: "00 + code"}."
+    }
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("1. Turn on BF and open its Pairing screen. It shows a 4-digit code.")
+        Text("2. Enter the code here, then pick BF-01.")
+        OutlinedTextField(code, { code = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("Code on BF's screen") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+        if (code.length == 4) Text("Passkey: ${BfProtocol.passkeyString(code)}")
+        Spacer(Modifier.height(8.dp))
+        Button(enabled = code.length == 4, onClick = {
+            val cdm = ctx.getSystemService(CompanionDeviceManager::class.java)
+            val req = AssociationRequest.Builder().addDeviceFilter(BluetoothLeDeviceFilter.Builder()
+                .setNamePattern(Pattern.compile("BF-01-.*")).build()).setSingleDevice(false).build()
+            @Suppress("DEPRECATION")
+            cdm.associate(req, object : CompanionDeviceManager.Callback() {
+                override fun onDeviceFound(s: IntentSender) { launcher.launch(IntentSenderRequest.Builder(s).build()) }
+                override fun onFailure(e: CharSequence?) { msg = "Search failed: $e" }
+            }, null)
+        }) { Text("Find & connect BF-01") }
+        if (msg.isNotEmpty()) Text(msg)
+        Spacer(Modifier.height(12.dp))
+        Section("Send Wi-Fi & server to BF") {
+            HelpNote("Fill in Wi-Fi in Settings › Connection & network first. BF restarts after saving.")
+            val scope = rememberCoroutineScope()
+            ActionButton("Send to BF", primary = true, icon = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send) { scope.launch { msg = if (hub.provision()) "Sent. BF will restart." else "Send failed. Make sure BF is connected." } }
+        }
+        OutlinedButton(done, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Done") }
+    }
+}
+
+@Composable fun CatatanScreen(hub: Hub) {
+    val rev by hub.revision.collectAsState(); val notes = rememberLoaded(hub, "notes", rev) { hub.db.notes() }
+    var q by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    // Filter hanya dihitung saat input/kumpulan data berubah, bukan tiap ketikan karakter lain direkomposisi.
+    val shown = remember(notes, q) { (notes ?: emptyList()).filter { it.type != "TASK" }.filter { q.isBlank() || (it.transcript + it.summary + it.tags + it.file).contains(q, true) } }
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), singleLine = true, shape = MaterialTheme.shapes.extraLarge,
+            leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null) }, placeholder = { Text("Search notes") })
+        HelpNote("${shown.size} notes · voice notes from BF show up here.", "Recordings saved as NOTE land here with a transcript and short summary. TASK recordings go to To-do instead. The audio stays on BF too.")
+        if (shown.isEmpty()) Text("No notes yet.")
+        androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(shown, key = { it.id }) { n ->
+                BubbleCard(Modifier.fillMaxWidth(), tail = 12.dp) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        DotText(fmtNote.format(Date(n.created)), Dot.S, 0.95f)
+                        Spacer(Modifier.weight(1f)); Text(n.file, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            if (n.summary.isNotBlank()) Text(n.summary, style = MaterialTheme.typography.titleMedium)
+                        }
+                        if (n.localPath.isNotEmpty()) PlayButton(n.localPath)
+                    }
+                    Text(n.transcript.ifBlank { if (n.localPath.isEmpty()) "(audio still on BF, syncs soon)" else "(transcribing…)" }, style = MaterialTheme.typography.bodyMedium, maxLines = 3,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if (n.tags.isNotBlank()) { Spacer(Modifier.height(8.dp)); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        n.tags.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { t ->
+                            DotPill(t, head = false) } } }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable fun TugasScreen(hub: Hub) {
+    val ctx = LocalContext.current; val scope = rememberCoroutineScope()
+    val rev by hub.revision.collectAsState(); var r by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var calOk by remember { mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.READ_CALENDAR) == android.content.pm.PackageManager.PERMISSION_GRANTED) }
+    val calLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { calOk = it; r++ }
+    // Muat data di latar belakang (IO) supaya buka tab & mencentang tugas tidak terasa jeda.
+    val d = rememberLoaded(hub, "tugas", rev, r) { hub.db.tasks() to id.yanuar.bf01.svc.CalendarSource.todayLines(ctx) }
+    val agenda = d?.second
+    // Tugas yang baru digeser (menunggu "Undo"): disembunyikan dulu, dihapus dari DB setelah snackbar selesai.
+    val pending = remember { mutableStateListOf<Long>() }
+    val tasks = d?.first?.filter { it.id !in pending }
+    var t by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }; var adding by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var sentAt by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val snack = remember { SnackbarHostState() }
+    val cs = MaterialTheme.colorScheme
+    fun add() { if (t.isNotBlank()) { hub.db.addTask(t.trim()); t = ""; adding = false; r++ } }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            // Agenda hari ini: baris biasa (bukan pil yang terlihat seperti tombol) + chip izin yang memang tombol.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Sym.CalendarToday, null, tint = cs.onSurfaceVariant); Spacer(Modifier.width(10.dp))
+                    Text(if (agenda.isNullOrEmpty()) "Today · empty" else "Today · ${agenda.size} events", style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                    Spacer(Modifier.width(12.dp)) }
+                    if (!calOk) AssistChip({ calLauncher.launch(android.Manifest.permission.READ_CALENDAR) }, { Text("Allow calendar") },
+                        leadingIcon = { Icon(Sym.Lock, null, Modifier.size(18.dp)) })
+                }
+                agenda?.forEach { a -> Row(Modifier.padding(start = 34.dp)) {
+                    Text(a.substringBefore(' '), style = MaterialTheme.typography.titleSmall, modifier = Modifier.width(56.dp))
+                    Text(a.substringAfter(' '), style = MaterialTheme.typography.bodyLarge) } }
+            }
+            if (adding) OutlinedTextField(t, { t = it }, Modifier.fillMaxWidth(), label = { Text("New task") }, singleLine = true, shape = MaterialTheme.shapes.large,
+                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
+                trailingIcon = { IconButton({ add() }, enabled = t.isNotBlank()) { Icon(Sym.Add, "Add") } })
+            Card(Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(cs.surfaceContainerHigh)) {
+                Row(Modifier.padding(start = 22.dp, end = 6.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Task", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Text("${tasks?.count { it.done } ?: 0}/${tasks?.size ?: 0}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
+                    InfoButton("Task tips", "• Swipe a task left to delete it. An Undo button appears right after.\n" +
+                        "• You can also add one by voice: hold the button on BF, speak, then choose TASK.\n" +
+                        "• Send to BF sends your events, tasks and reminders for the next 48 hours, because the phone can't reach BF while it sleeps.")
+                }
+                if (tasks?.isEmpty() == true) Text("No tasks yet. Tap + Task to add one.", style = MaterialTheme.typography.bodyMedium,
+                    color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp))
+                tasks?.forEach { k -> key(k.id) {
+                    val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
+                        if (v == SwipeToDismissBoxValue.EndToStart) {
+                            pending.add(k.id)
+                            scope.launch {
+                                var undo = false
+                                try { undo = snack.showSnackbar("Task deleted", "Undo", duration = SnackbarDuration.Short) == SnackbarResult.ActionPerformed }
+                                finally { if (!undo) hub.db.deleteTask(k.id); pending.remove(k.id); r++ }
+                            }
+                            true
+                        } else false })
+                    SwipeToDismissBox(state, enableDismissFromStartToEnd = false, backgroundContent = {
+                        Box(Modifier.fillMaxSize().background(cs.errorContainer).padding(horizontal = 24.dp), contentAlignment = Alignment.CenterEnd) {
+                            Icon(Sym.Delete, "Delete", tint = cs.onErrorContainer) } }) {
+                        Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHigh).clickable { hub.db.setDone(k.id, !k.done); r++ }
+                            .padding(start = 10.dp, end = 22.dp, top = 4.dp, bottom = 4.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(k.done, { hub.db.setDone(k.id, it); r++ })
+                            Spacer(Modifier.width(6.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(k.title, style = MaterialTheme.typography.bodyLarge,
+                                    textDecoration = if (k.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                                    color = if (k.done) cs.onSurfaceVariant else cs.onSurface)
+                                if (k.detail.isNotBlank()) Text(k.detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                                    maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                } }
+                Spacer(Modifier.height(12.dp))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ActionButton("Send to BF", Modifier, icon = Sym.Sync) {
+                    scope.launch { hub.syncTime(); hub.ble.write(BfProtocol.NOTIFY, BfProtocol.agenda(agenda ?: emptyList())); hub.pushTasks(); hub.pushAlarms()
+                        sentAt = fmtClock.format(Date()) } }
+                if (sentAt.isNotEmpty()) { Spacer(Modifier.width(12.dp))
+                    Text("last $sentAt", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant) }
+            }
+        }
+        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp))
+        ExtendedFloatingActionButton(text = { Text("Task") }, icon = { Icon(Sym.Add, null) },
+            onClick = { adding = true }, modifier = Modifier.align(Alignment.BottomEnd))
+    }
+}
+
+private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
+
+/** Satu baris ingatan: penanda "auto" kecil untuk yang dibuat otomatis; geser ke samping atau ketuk ikon hapus. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable private fun MemoryRow(m: id.yanuar.bf01.data.Memory, onDelete: () -> Unit) {
+    val st = rememberSwipeToDismissBoxState(confirmValueChange = { if (it != SwipeToDismissBoxValue.Settled) { onDelete(); true } else false })
+    SwipeToDismissBox(st, backgroundContent = {}) {
+        Row(Modifier.fillMaxWidth().background(LocalBubble.current.container), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(m.text, style = MaterialTheme.typography.bodyMedium)
+                if (m.auto) Text(stringResource(R.string.ask_memory_auto, if (m.source == "note") stringResource(R.string.ask_memory_from_note) else stringResource(R.string.ask_memory_from_chat)),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onDelete) { Icon(Sym.Delete, stringResource(R.string.ask_memory_delete), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    }
+}
+
+@Composable fun NgobrolScreen(hub: Hub) {
+    DisposableEffect(Unit) { onDispose { hub.autoMemory.flush() } }
+    var r by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }; val rev by hub.revision.collectAsState()
+    // Chat and memories load once per data change, not on every recomposition.
+    val d = rememberLoaded(hub, "ngobrol", r, rev) { hub.db.chat() to hub.db.memories() }
+    val chat = d?.first; val mems = d?.second
+    var persona by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(hub.prefs.persona) }; var mem by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var msg by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }; var busy by remember { mutableStateOf(false) }; var more by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope(); val cs = MaterialTheme.colorScheme; val ai = hub.prefs.aiName
+    fun send(text: String) { val m = text.trim(); if (m.isNotEmpty() && !busy) { msg = ""; busy = true
+        scope.launch { runCatching { hub.chatText(m) }.onFailure { hub.log("Chat failed: ${it.message}") }; busy = false; r++ } } }
+    val empty = chat?.isEmpty() == true && !busy
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (empty) Spacer(Modifier.height(28.dp))
+            // Greeting speech bubble (always with a tail); the persona & memory dropdown sits inside at its bottom.
+            BubbleCard(Modifier.fillMaxWidth(), tail = 18.dp) {
+                if (empty) {
+                    Text(stringResource(R.string.ask_hello), style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(8.dp))
+                    Text(stringResource(R.string.ask_intro, ai), style = MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.height(16.dp))
+                    HorizontalDivider(color = LocalContentColor.current.copy(alpha = 0.15f))
+                    Spacer(Modifier.height(4.dp))
+                }
+                val rot by androidx.compose.animation.core.animateFloatAsState(if (more) 180f else 0f, label = "chev")
+                val ink = LocalContentColor.current
+                Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable { more = !more }.padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(36.dp).background(ink.copy(alpha = 0.08f), androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(Sym.Person, null, Modifier.size(20.dp), tint = ink) }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.ask_persona_title, ai), style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.ask_persona_sub, if (hub.prefs.llmProvider == "qwen") "Qwen" else "Grok", ai),
+                            style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.7f))
+                    }
+                    Icon(Sym.ExpandMore, stringResource(if (more) R.string.collapse else R.string.expand), Modifier.graphicsLayer { rotationZ = rot }, tint = ink)
+                }
+                androidx.compose.animation.AnimatedVisibility(more) {
+                    // Inside the bubble the colors are inverted, so fields use the opposite scheme.
+                    MaterialTheme(colorScheme = if (LocalBubble.current.container == androidx.compose.ui.graphics.Color.White) PfLight else PfDark) {
+                        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(stringResource(R.string.ask_persona), style = MaterialTheme.typography.labelLarge)
+                            OutlinedTextField(persona, { persona = it }, Modifier.fillMaxWidth(), minLines = 3, shape = MaterialTheme.shapes.large)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                ActionButton(stringResource(R.string.save), Modifier.weight(1f), icon = Sym.Save) { hub.prefs.persona = persona }
+                                OutlinedButton({ persona = Prefs.DEFAULT_PERSONA; hub.prefs.persona = persona }, Modifier.weight(1f).heightIn(min = 48.dp)) {
+                                    Icon(Sym.RestartAlt, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.ask_default), maxLines = 1) } }
+                            Spacer(Modifier.height(4.dp))
+                            Text(stringResource(R.string.ask_memory), style = MaterialTheme.typography.labelLarge)
+                            if (mems.isNullOrEmpty()) HelpNote(stringResource(R.string.ask_memory_empty, ai))
+                            mems?.forEach { m -> key(m.id) { MemoryRow(m) { hub.db.deleteMemory(m.id); r++ } } }
+                            OutlinedTextField(mem, { mem = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.ask_memory_add)) }, shape = MaterialTheme.shapes.large,
+                                trailingIcon = { IconButton({ if (mem.isNotBlank()) { hub.db.addMemory(mem.trim()); mem = ""; r++ } }, enabled = mem.isNotBlank()) { Icon(Sym.Add, stringResource(R.string.add)) } })
+                            OutlinedButton({ confirmClear = true }, Modifier.heightIn(min = 48.dp), enabled = !chat.isNullOrEmpty()) {
+                                Icon(Sym.DeleteSweep, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.ask_clear)) }
+                        }
+                    }
+                }
+            }
+            if (empty) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    saran.forEach { s -> val t = stringResource(s); SuggestionChip({ send(t) }, { Text(t, Modifier.padding(vertical = 8.dp)) }, Modifier.fillMaxWidth(),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)) }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            chat?.forEach { c ->
+                ChatBubble(c.text, fromBf = c.role != "user",
+                    header = (if (c.role == "user") "Mas Yan" else ai) + " · " + fmtClock.format(Date(c.time)))
+            }
+            if (busy) DotText("${ai.uppercase()} THINKING...", Dot.S, 1f, color = cs.onSurfaceVariant)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(msg, { msg = it }, Modifier.weight(1f), placeholder = { Text(stringResource(R.string.ask_hint, ai)) }, shape = MaterialTheme.shapes.extraLarge, maxLines = 3)
+            Spacer(Modifier.width(10.dp))
+            FloatingActionButton({ send(msg) }) { Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send, stringResource(R.string.send)) }
+        }
+    }
+    if (confirmClear) AlertDialog({ confirmClear = false }, icon = { Icon(Sym.DeleteSweep, null) }, title = { Text(stringResource(R.string.ask_clear_q)) },
+        text = { Text(stringResource(R.string.ask_clear_note, ai)) },
+        confirmButton = { TextButton({ hub.db.clearChat(); r++; confirmClear = false }) { Text(stringResource(R.string.delete)) } },
+        dismissButton = { TextButton({ confirmClear = false }) { Text(stringResource(R.string.cancel)) } })
+}
+
+@Composable fun KartuScreen(hub: Hub) {
+    val p = hub.prefs; val scope = rememberCoroutineScope()
+    var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.cardName) }; var title by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.cardTitle) }
+    var phone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.cardPhone) }; var msg by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.cardMsg) }; var status by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    fun save() { p.cardName = name; p.cardTitle = title; p.cardPhone = phone; p.cardMsg = msg }
+    val link = "https://wa.me/${phone.filter(Char::isDigit)}?text=${Uri.encode(msg)}"
+    Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(name, { name = it.uppercase() }, Modifier.fillMaxWidth(), label = { Text("Name") })
+        OutlinedTextField(title, { title = it.uppercase() }, Modifier.fillMaxWidth(), label = { Text("Job title") })
+        OutlinedTextField(phone, { phone = it }, Modifier.fillMaxWidth(), label = { Text("WhatsApp number (62…)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+        OutlinedTextField(msg, { msg = it }, Modifier.fillMaxWidth(), label = { Text("Opening message") })
+        QrPreview(link); Text(link, style = MaterialTheme.typography.bodySmall)
+        ActionButton("Save & send", primary = true, icon = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send) { save(); scope.launch { status = if (hub.sendNameCard()) "Sent to BF" else "Failed: BF is not connected" } }
+        Text(status)
+    }
+}
+
+@Composable fun MenuScreen(hub: Hub) {
+    var items by remember { mutableStateOf(hub.prefs.menuOrder.split(",").filter { it.isNotBlank() }) }
+    val all = Prefs.DEFAULT_MENU.split(",")
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        HelpNote("Set what BF's menu shows and in what order (3 pages, 2 buttons per page).")
+        items.forEachIndexed { i, s -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("${i + 1}. $s", Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            IconButton({ if (i > 0) items = items.toMutableList().also { java.util.Collections.swap(it, i, i - 1) } }, enabled = i > 0) { Icon(Icons.Default.KeyboardArrowUp, "Up") }
+            IconButton({ if (i < items.size - 1) items = items.toMutableList().also { java.util.Collections.swap(it, i, i + 1) } }, enabled = i < items.size - 1) { Icon(Icons.Default.KeyboardArrowDown, "Down") }
+            IconButton({ items = items - s }) { Icon(Icons.Default.Close, "Hide") } } }
+        (all - items.toSet()).forEach { s -> OutlinedButton({ items = items + s }) { Text("+ $s") } }
+        ActionButton("Save", primary = true, icon = Sym.Save) { hub.prefs.menuOrder = items.joinToString(",") }
+        HelpNote("The new order is saved on the phone; it goes to BF in the next firmware.")
+    }
+}
+
+@Composable fun FileScreen(hub: Hub) {
+    val scope = rememberCoroutineScope(); val ctx = LocalContext.current; val cs = MaterialTheme.colorScheme
+    val st by hub.recordings.status.collectAsState(); val ble by hub.ble.state.collectAsState(); val rev by hub.revision.collectAsState()
+    LaunchedEffect(rev) { hub.recordings.refreshCount() }
+    var files by remember { mutableStateOf(listOf<BfProtocol.FileEntry>()) }
+    var adv by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val busy = st.phase in setOf(id.yanuar.bf01.svc.RecordingSync.Phase.Connecting, id.yanuar.bf01.svc.RecordingSync.Phase.Downloading, id.yanuar.bf01.svc.RecordingSync.Phase.Transcribing)
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        BubbleCard(Modifier.fillMaxWidth(), tail = 14.dp) {
+            Text(if (st.notOnPhone == 0) stringResource(R.string.rec_status_none) else stringResource(R.string.rec_status_n, st.notOnPhone),
+                style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(6.dp))
+            val last = hub.prefs.lastRecSync
+            Text(if (last == 0L) stringResource(R.string.rec_never) else stringResource(R.string.rec_last, fmtNote.format(Date(last))),
+                style = MaterialTheme.typography.bodyMedium)
+            if (st.message.isNotBlank()) { Spacer(Modifier.height(4.dp)); Text(st.message, style = MaterialTheme.typography.bodyMedium) }
+            Spacer(Modifier.height(14.dp))
+            ActionButton(stringResource(R.string.rec_sync), primary = true, enabled = ble == BleManager.State.READY && !busy, icon = Sym.CloudSync) {
+                scope.launch { hub.recordings.run(manual = true) } }
+            if (ble != BleManager.State.READY) HelpNote("Sync is available once BF is connected.")
+        }
+        HelpNote(stringResource(R.string.rec_how), stringResource(R.string.rec_how_detail))
+        val rot by androidx.compose.animation.core.animateFloatAsState(if (adv) 180f else 0f, label = "adv")
+        Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable { adv = !adv }.heightIn(min = 48.dp).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.rec_advanced), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Icon(Sym.ExpandMore, stringResource(if (adv) R.string.collapse else R.string.expand), Modifier.graphicsLayer { rotationZ = rot })
+        }
+        androidx.compose.animation.AnimatedVisibility(adv) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Section(stringResource(R.string.file_tf)) {
+                    HelpNote(stringResource(R.string.file_tf_desc))
+                    ActionButton(stringResource(R.string.file_tf_read), icon = Sym.Refresh, enabled = ble == BleManager.State.READY) {
+                        scope.launch { files = hub.ble.read(BfProtocol.FILES)?.let { BfProtocol.parseFiles(String(it)) } ?: emptyList() } }
+                    files.forEach { f -> Text("${f.name} · ${f.bytes / 1024} KB · ${if (f.synced) "on phone" else "not on phone yet"}",
+                        style = MaterialTheme.typography.bodyMedium) }
+                }
+                Section(stringResource(R.string.file_export)) {
+                    HelpNote(stringResource(R.string.file_export_desc))
+                    val title = stringResource(R.string.file_export)
+                    ActionButton(stringResource(R.string.file_export_md), icon = androidx.compose.material.icons.Icons.Default.Share) {
+                        val md = buildString { appendLine("# BF-01 notes"); hub.db.notes().forEach { appendLine("\n## ${it.file} (${it.type})\n${it.summary}\n\n${it.transcript}") }
+                            appendLine("\n# To-do"); hub.db.tasks().forEach { appendLine("- [${if (it.done) "x" else " "}] ${it.title}") } }
+                        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/markdown").putExtra(Intent.EXTRA_TEXT, md), title))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Putar/stop rekaman di HP. */
+@Composable fun PlayButton(path: String) {
+    var player by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    DisposableEffect(path) { onDispose { player?.release(); player = null } }
+    val playing = player != null
+    FilledTonalIconButton({
+        if (playing) { player?.release(); player = null }
+        else player = runCatching { android.media.MediaPlayer().apply { setDataSource(path); setOnCompletionListener { it.release(); player = null }; prepare(); start() } }.getOrNull()
+    }, Modifier.size(48.dp)) { Icon(if (playing) androidx.compose.material.icons.Icons.Default.Close else androidx.compose.material.icons.Icons.Default.PlayArrow, if (playing) "Stop" else "Play") }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+fun linkLabel(linked: Boolean, st: BleManager.State) = when {
+    !linked -> "DISCONNECTED"; st == BleManager.State.READY -> "CONNECTED"; else -> "CONNECTING"
+}
+
+/** Sakelar besar Sambungkan/Putuskan (tersimpan, tetap berlaku setelah app ditutup / HP restart). */
+@Composable fun LinkToggle(hub: Hub, linked: Boolean) {
+    if (linked) OutlinedButton({ hub.disconnectAll() }, Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Disconnect") }
+    else Button({ hub.reconnect() }, Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Connect to BF") }
+}
+
+/** Beranda Setelan: kartu WHERE'S MINE + 6 kategori berikon (sub-halaman). */
+@Composable fun PengaturanScreen(hub: Hub, open: (Screen) -> Unit = {}) {
+    val p = hub.prefs; val ctx = LocalContext.current
+    val linked by hub.linked.collectAsState(); val paused by hub.forwardPaused.collectAsState(); val st by hub.ble.state.collectAsState()
+    val usage = rememberLoaded(hub, "pemakaian") { hub.db.usageThisMonth() }
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        WheresMineCard(hub)
+        NavCard {
+            NavRow(Sym.SmartToy, "AI provider", (if (p.llmProvider == "qwen") "Qwen · " + (if (p.qwenKey.isBlank()) "no key yet" else "key saved")
+                else "Grok · " + (if (p.xaiKey.isBlank()) "no key yet" else "key saved"))) { open(Screen.SetAi) }
+            NavDivider()
+            NavRow(Sym.RecordVoiceOver, "BF & voice", "Sleep ${p.sleepSec} s · quiet hours ${p.quietStart}–${p.quietEnd}") { open(Screen.SetSuara) }
+            NavDivider()
+            NavRow(Sym.Bluetooth, "Connection & network", "${linkLabel(linked, st).lowercase().replaceFirstChar { it.uppercase() }} · Wi-Fi, phone server") { open(Screen.SetJaringan) }
+            NavDivider()
+            NavRow(Sym.Notifications, "Notifications & permissions", "Maps & music to BF ${if (paused) "paused" else "on"}") { open(Screen.SetIzin) }
+            NavDivider()
+            NavRow(Sym.DeveloperBoard, "Device", "Pairing, name card, BF menu, files") { open(Screen.SetPerangkat) }
+            NavDivider()
+            NavRow(Sym.BarChart, "Usage & about", "${usage?.let { "%.0f".format(it.first + it.second) } ?: "–"} min of audio this month · v${appVersion(ctx)}") { open(Screen.SetPemakaian) }
+        }
+    }
+}
+
+fun appVersion(ctx: android.content.Context): String = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
+
+/** Buka lokasi di Google Maps; kalau Maps tidak ada, pakai geo: (app peta lain). */
+fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
+    val maps = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lon")).setPackage("com.google.android.apps.maps")
+    try { ctx.startActivity(maps) } catch (_: android.content.ActivityNotFoundException) {
+        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon(BF)"))) }
+    }
+}
+
+@Composable fun WheresMineCard(hub: Hub) {
+    val p = hub.prefs; val ctx = LocalContext.current; val scope = rememberCoroutineScope(); val st by hub.ble.state.collectAsState()
+    var ringing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val cs = MaterialTheme.colorScheme; val has = !p.lastLat.isNaN()
+    Surface(Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp), color = cs.inverseSurface, contentColor = cs.inverseOnSurface) {
+        Column(Modifier.padding(horizontal = 22.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BfHead(30.dp, color = cs.inverseOnSurface); Spacer(Modifier.width(14.dp))
+                DotText("WHERE'S MINE", Dot.L, 1.1f, color = cs.inverseOnSurface)
+            }
+            Text(if (has) "Last seen · ${fmt.format(Date(p.lastLocTime))}" else "No saved location yet", style = MaterialTheme.typography.bodyLarge)
+            if (st != BleManager.State.READY) Row(verticalAlignment = Alignment.Top) {
+                Icon(Sym.Info, null, Modifier.size(16.dp).padding(top = 1.dp)); Spacer(Modifier.width(8.dp))
+                Text("BF is asleep: it only rings once awake (PWR).", style = MaterialTheme.typography.bodySmall, maxLines = 2) }
+            val bc = ButtonDefaults.buttonColors(containerColor = cs.surface, contentColor = cs.onSurface, disabledContainerColor = cs.surface.copy(alpha = 0.4f),
+                disabledContentColor = cs.onSurface.copy(alpha = 0.5f))
+            AdaptiveRow {
+                Button({ val on = !ringing; ringing = on; scope.launch { hub.ble.write(BfProtocol.FIND, BfProtocol.find(on)) } }, Modifier.cell(1f).heightIn(min = 48.dp),
+                    colors = bc, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                    Icon(if (ringing) Sym.StopCircle else Sym.NotificationsActive, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                    Text(if (ringing) "Stop" else "Ring", maxLines = 1) }
+                Button({ openMaps(ctx, p.lastLat, p.lastLon) }, Modifier.cell(1.25f).heightIn(min = 48.dp), enabled = has, colors = bc,
+                    contentPadding = PaddingValues(horizontal = 12.dp)) {
+                    Icon(Sym.LocationOn, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Open in Maps", maxLines = 1) }
+            }
+        }
+    }
+}
+
+@Composable internal fun SubPage(content: @Composable ColumnScope.() -> Unit) =
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
+
+@Composable fun SetAiScreen(hub: Hub) {
+    val p = hub.prefs; var r by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var xk by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    @Suppress("UNUSED_VARIABLE") val tick = r  // baca r supaya halaman dirender ulang setelah prefs berubah
+    SubPage {
+        Section(stringResource(R.string.ai_name)) {
+            var nm by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.aiName) }
+            OutlinedTextField(nm, { nm = it.take(16); if (it.isNotBlank()) p.aiName = it }, Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text(stringResource(R.string.ai_name)) }, placeholder = { Text("BF") }, shape = MaterialTheme.shapes.large)
+            HelpNote(stringResource(R.string.ai_name_desc))
+        }
+        Section(stringResource(R.string.ask_memory)) {
+            Toggle(stringResource(R.string.auto_mem), p.autoMemory, stringResource(R.string.auto_mem_desc, p.aiName)) { p.autoMemory = it; r++ }
+        }
+        Section("Provider") {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                listOf("grok" to "Grok", "qwen" to "Qwen").forEachIndexed { i, (id, label) ->
+                    SegmentedButton(p.llmProvider == id, { p.llmProvider = id; r++ }, SegmentedButtonDefaults.itemShape(i, 2),
+                        colors = SegmentedButtonDefaults.colors(inactiveContainerColor = androidx.compose.ui.graphics.Color.Transparent)) {
+                        Text(label, maxLines = 1, softWrap = false) } }
+            }
+            HelpNote("One choice for everything: speech recognition, chat, and BF's voice.",
+                "Grok is from xAI, Qwen from Alibaba. The chosen provider handles speech recognition (STT), the chat brain, and BF's voice when available.")
+        }
+        if (p.llmProvider == "qwen") {
+            var qk by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+            var qb by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.qwenBaseUrl) }; var qm by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.qwenModel) }
+            Section("Qwen API key") {
+                Text(if (p.qwenKey.isBlank()) "Not set" else "Saved encrypted (…${p.qwenKey.takeLast(4)})")
+                OutlinedTextField(qk, { qk = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("API key (DashScope)") },
+                    visualTransformation = PasswordVisualTransformation(), shape = MaterialTheme.shapes.large)
+                ActionButton("Save", enabled = qk.isNotBlank(), icon = Sym.Save) { p.qwenKey = qk.trim(); qk = ""; r++ }
+            }
+            Section("Region & model") {
+                Row { FilterChip(qb == Prefs.QWEN_BASE_INTL, { qb = Prefs.QWEN_BASE_INTL; p.qwenBaseUrl = qb }, { Text("International") })
+                    Spacer(Modifier.width(8.dp)); FilterChip(qb == Prefs.QWEN_BASE_CN, { qb = Prefs.QWEN_BASE_CN; p.qwenBaseUrl = qb }, { Text("China") }) }
+                OutlinedTextField(qb, { qb = it; p.qwenBaseUrl = it }, Modifier.fillMaxWidth(), label = { Text("Base URL") }, shape = MaterialTheme.shapes.large)
+                HelpNote("The key must come from the same region as the Base URL.")
+                OutlinedTextField(qm, { qm = it; p.qwenModel = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Chat model") }, shape = MaterialTheme.shapes.large)
+                HelpNote("Speech recognition: ${QwenStt.MODEL} (Indonesian).")
+            }
+        } else {
+            var model by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.chatModel) }
+            Section("xAI API key") {
+                Text(if (p.xaiKey.isBlank()) "Not set" else "Saved encrypted (…${p.xaiKey.takeLast(4)})")
+                OutlinedTextField(xk, { xk = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("xAI API key") },
+                    visualTransformation = PasswordVisualTransformation(), shape = MaterialTheme.shapes.large)
+                ActionButton("Save", enabled = xk.isNotBlank(), icon = Sym.Save) { p.xaiKey = xk.trim(); xk = ""; r++ }
+            }
+            Section("Model") {
+                OutlinedTextField(model, { model = it; p.chatModel = it.trim() }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Grok chat model") }, shape = MaterialTheme.shapes.large)
+            }
+        }
+    }
+}
+
+@Composable fun SetSuaraScreen(hub: Hub) {
+    val p = hub.prefs; val scope = rememberCoroutineScope(); var r by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    SubPage {
+        Section("BF's voice") {
+            if (p.llmProvider == "qwen") HelpNote("Google's Indonesian voice on the phone.", "Qwen TTS voices don't support Indonesian yet, so BF uses Google's id-ID voice on the phone.")
+            else {
+                var voice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.ttsVoice) }
+                key(r) { Toggle("Voice from xAI", p.ttsProvider == "xai", sub = "Off = Google's Indonesian voice on the phone") { p.ttsProvider = if (it) "xai" else "system"; r++ } }
+                if (p.ttsProvider == "xai") OutlinedTextField(voice, { voice = it; p.ttsVoice = it.trim() }, Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("xAI voice (voice_id)") }, shape = MaterialTheme.shapes.large)
+            }
+            if (ModeCepat.IMPLEMENTED) key(r) { Toggle("Fast mode (realtime)", p.modeCepat) { p.modeCepat = it; r++ } }
+            else Toggle("Fast mode (realtime)", false, sub = "Soon", enabled = false) {}
+        }
+        Section("Sleep") {
+            var sl by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.sleepSec.toString()) }
+            OutlinedTextField(sl, { sl = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Sleep after idle (seconds)") },
+                supportingText = { Text("15 to 3600 seconds") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = MaterialTheme.shapes.large)
+            ActionButton("Send to BF", icon = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send) { p.sleepSec = sl.toIntOrNull() ?: 60; sl = p.sleepSec.toString()
+                scope.launch { hub.ble.write(BfProtocol.NOTIFY, BfProtocol.sleepTimeout(p.sleepSec)) } }
+        }
+        Section("Quiet hours") {
+            var qs by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.quietStart.toString()) }; var qe by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.quietEnd.toString()) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(qs, { qs = it.filter(Char::isDigit).take(2) }, Modifier.weight(1f), singleLine = true, label = { Text("From") },
+                    suffix = { Text(".00") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = MaterialTheme.shapes.large)
+                OutlinedTextField(qe, { qe = it.filter(Char::isDigit).take(2) }, Modifier.weight(1f), singleLine = true, label = { Text("To") },
+                    suffix = { Text(".00") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = MaterialTheme.shapes.large) }
+            ActionButton("Save", icon = Sym.Save) { p.quietStart = (qs.toIntOrNull() ?: 22) % 24; p.quietEnd = (qe.toIntOrNull() ?: 6) % 24 }
+        }
+    }
+}
+
+@Composable fun SetJaringanScreen(hub: Hub) {
+    val p = hub.prefs; var r by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    val linked by hub.linked.collectAsState(); val st by hub.ble.state.collectAsState()
+    SubPage {
+        Section("BF connection") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { DotText(linkLabel(linked, st), Dot.S, 1.1f) }
+                Switch(linked, { if (it) hub.reconnect() else hub.disconnectAll() })
+            }
+            HelpNote("Off = Bluetooth & Wi-Fi to BF are cut and won't reconnect automatically.")
+        }
+        for (i in 0..1) {
+            val (s0, p0) = p.wifi(i); var s by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(s0) }; var pw by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p0) }
+            Section(if (i == 0) "Wi-Fi 1 (home)" else "Wi-Fi 2 (phone hotspot)") {
+                OutlinedTextField(s, { s = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Wi-Fi name (SSID)") }, shape = MaterialTheme.shapes.large,
+                    leadingIcon = { Icon(Sym.Wifi, null) })
+                OutlinedTextField(pw, { pw = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Password") }, visualTransformation = PasswordVisualTransformation(),
+                    shape = MaterialTheme.shapes.large, leadingIcon = { Icon(Sym.Key, null) })
+                ActionButton("Save", icon = Sym.Save) { p.setWifi(i, s, pw) }
+            }
+        }
+        Section("Server on the phone") {
+            var host by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.serverHost) }
+            OutlinedTextField(host, { host = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Phone IP as seen by BF") }, shape = MaterialTheme.shapes.large,
+                leadingIcon = { Icon(Sym.Dns, null) })
+            HelpNote("On the phone hotspot it is often 192.168.43.1, but can differ.", "When BF uses this phone's hotspot, the IP is often 192.168.43.1, but can differ. Check Android Settings › Mobile hotspot.")
+            AdaptiveRow {
+                ActionButton("Save", Modifier.cell(1f), icon = Sym.Save) { p.serverHost = host.trim() }
+                OutlinedButton({ p.rotateToken(); r++ }, Modifier.cell(1f).heightIn(min = 48.dp)) {
+                    Icon(Sym.Key, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("New token", maxLines = 1) }
+            }
+            HelpNote("After changing the token, send it again from Pairing.")
+        }
+    }
+}
+
+@Composable fun SetIzinScreen(hub: Hub) {
+    val p = hub.prefs; val ctx = LocalContext.current; var r by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    val linked by hub.linked.collectAsState(); val paused by hub.forwardPaused.collectAsState()
+    SubPage {
+        Section("Forward to BF") {
+            Toggle("Pause forwarding", paused, sub = "Maps navigation & music info are not forwarded.", enabled = linked) { hub.setForwardPaused(it) }
+            key(r) { Toggle("Navigation from Google Maps", p.navEnabled) { p.navEnabled = it; r++ } }
+        }
+        NavCard {
+            NavRow(Sym.Notifications, "Notification access", "Only Google Maps notifications are read") { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+            NavDivider()
+            NavRow(Sym.NotificationsActive, "Do Not Disturb access", "So Find Phone still rings") { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+        }
+    }
+}
+
+@Composable fun SetPerangkatScreen(hub: Hub, open: (Screen) -> Unit) {
+    val info by hub.ble.info.collectAsState()
+    SubPage {
+        NavCard {
+            NavRow(Sym.SystemUpdate, stringResource(Screen.SetFirmware.title), "BF ${id.yanuar.bf01.fw.FirmwareImage.displayVersion(info?.fw)} · latest v${id.yanuar.bf01.fw.FirmwareImage.LATEST}") { open(Screen.SetFirmware) }
+            NavDivider()
+            NavRow(Sym.Bluetooth, stringResource(Screen.Pairing.title), "Connect a new BF & send Wi-Fi") { open(Screen.Pairing) }
+            NavDivider()
+            NavRow(Sym.Person, stringResource(Screen.Kartu.title), "WhatsApp QR on BF's screen") { open(Screen.Kartu) }
+            NavDivider()
+            NavRow(Sym.DeveloperBoard, stringResource(Screen.Menu.title), "BF menu items & order") { open(Screen.Menu) }
+            NavDivider()
+            NavRow(Sym.Dns, stringResource(Screen.File.title), "Sync recordings, memory card, export") { open(Screen.File) }
+        }
+    }
+}
+
+@Composable fun SetPemakaianScreen(hub: Hub) {
+    val p = hub.prefs; val ctx = LocalContext.current; val info by hub.ble.info.collectAsState()
+    val usage = rememberLoaded(hub, "pemakaian") { hub.db.usageThisMonth() } ?: Triple(0.0, 0.0, 0)
+    val (stt, tts, calls) = usage
+    SubPage {
+        Section("Usage this month") {
+            Text("STT ${"%.1f".format(stt)} min · TTS ${"%.1f".format(tts)} min · $calls chats", style = MaterialTheme.typography.bodyLarge)
+            var cap by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.monthlyCapMin.toString()) }
+            OutlinedTextField(cap, { cap = it.filter(Char::isDigit); p.monthlyCapMin = cap.toIntOrNull() ?: 0 }, Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("Monthly audio limit (minutes)") }, supportingText = { Text("0 = no limit") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), shape = MaterialTheme.shapes.large)
+        }
+        Section("About") {
+            Text("Pocket Friend v${appVersion(ctx)}", style = MaterialTheme.typography.bodyLarge)
+            Text("BF firmware ${info?.fw ?: "–"}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Baris tombol yang otomatis jadi tumpuk vertikal saat huruf diperbesar (fontScale > 1.1), supaya label tidak terpotong. */
+interface CellScope { fun Modifier.cell(weight: Float): Modifier }
+@Composable fun AdaptiveRow(content: @Composable CellScope.() -> Unit) {
+    if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.1f)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { val sc = object : CellScope { override fun Modifier.cell(weight: Float) = fillMaxWidth() }; sc.content() }
+    else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { val rs = this
+        val sc = object : CellScope { override fun Modifier.cell(weight: Float) = with(rs) { weight(weight) } }; sc.content() }
+}
