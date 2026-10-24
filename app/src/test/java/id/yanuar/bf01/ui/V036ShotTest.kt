@@ -34,7 +34,7 @@ class V036ShotTest {
         prefs.deviceAddress = "AA:BB:CC:DD:4E:27"; prefs.setWifi(0, "Rumah Yan", "rahasia123"); prefs.setWifi(1, "", "")
         return Hub(ctx, prefs)
     }
-    private fun out(n: String, fs: Float) = "/workspace/pf_v037/shots/${n}_fs${(fs * 100).toInt()}.png"
+    private fun out(n: String, fs: Float) = "/workspace/pf_v038/shots/${n}_fs${(fs * 100).toInt()}.png"
     private fun page(n: String, fs: Float = 1.15f, act: () -> Unit = {}) {
         RuntimeEnvironment.setFontScale(fs); val h = hub()
         rule.setContent { PocketFriendTheme(true) { App(h, Screen.SetJaringan) } }

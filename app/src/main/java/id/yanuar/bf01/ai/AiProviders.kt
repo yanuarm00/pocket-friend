@@ -13,7 +13,9 @@ object AiProviders {
     /** Qwen chat models from Model Studio's model list (checked 24 Oct 2026). The stable aliases always point to the newest snapshot. */
     /** Chat models. First = default. TokenPlan Lite list seen in Model Studio on 24 Oct 2026, then the pay-as-you-go aliases. */
     val QWEN_MODELS = listOf(
-        Model("qwen3.8-flash", "Qwen3.8 Flash · fast (recommended)"),
+        Model("qwen-flash-character", "Qwen Flash Character · free quota (recommended)"),
+        Model("qwen-plus-character", "Qwen Plus Character · free quota"),
+        Model("qwen3.8-flash", "Qwen3.8 Flash · fast"),
         Model("qwen3.7-plus", "Qwen3.7 Plus · balanced"),
         Model("qwen3.8-max", "Qwen3.8 Max · smartest"),
         Model("qwen3.7-max", "Qwen3.7 Max"),
@@ -25,7 +27,8 @@ object AiProviders {
     )
     /** Speech-recognition models. qwen-audio-3.0 uses the native API; qwen3-asr-flash the OpenAI-compatible one. */
     val QWEN_ASR_MODELS = listOf(
-        Model("qwen-audio-3.0-asr-flash", "Qwen Audio 3.0 ASR Flash (recommended)"),
+        Model("qwen-audio-3.1-asr-flash", "Qwen Audio 3.1 ASR Flash · free quota (recommended)"),
+        Model("qwen-audio-3.0-asr-flash", "Qwen Audio 3.0 ASR Flash"),
         Model("qwen3-asr-flash", "Qwen3 ASR Flash"),
     )
     val ALL = listOf(

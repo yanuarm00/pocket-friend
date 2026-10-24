@@ -26,6 +26,23 @@ class AiStackTest {
         assertEquals(listOf("qwen"), AiProviders.visible.map { it.id }); assertTrue(AiProviders.ALL.any { it.id == "grok" })
     }
 
+    @Test fun oldDefaultModelMigratesUnlessPicked() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val sp = ctx.getSharedPreferences("bf01", Context.MODE_PRIVATE); sp.edit().clear().putString("qwen_model", "qwen-plus").commit()
+        val p = Prefs(ctx, sp)
+        assertEquals("qwen-flash-character", p.qwenModel)
+        p.qwenModel = "qwen-plus"; assertEquals("qwen-plus", p.qwenModel)
+        sp.edit().clear().putString("qwen_model", "qwen3.7-max").commit(); assertEquals("qwen3.7-max", Prefs(ctx, sp).qwenModel); sp.edit().clear().commit()
+    }
+
+    @Test fun characterModelKeepsPersonaSystemPrompt() {
+        val b = chatBody("qwen-flash-character", "Kamu BF, teman saku.", emptyList(), "halo")
+        assertEquals("qwen-flash-character", b.getString("model"))
+        val m0 = b.getJSONArray("messages").getJSONObject(0)
+        assertEquals("system", m0.getString("role")); assertEquals("Kamu BF, teman saku.", m0.getString("content"))
+        assertFalse(b.has("enable_thinking"))
+    }
+
     @Test fun qwenModelListHasDefault() = assertEquals(Prefs.QWEN_MODEL, AiProviders.QWEN_MODELS.first().id)
 
     @Test fun qwenNeverTouchesXai() {
@@ -47,6 +64,7 @@ class AiStackTest {
         assertTrue(QwenStt.isNative(Prefs.QWEN_ASR)); assertFalse(QwenStt.isNative("qwen3-asr-flash"))
         val b = QwenStt.nativeBody(byteArrayOf(1, 2, 3), "qwen-audio-3.0-asr-flash")
         assertEquals("qwen-audio-3.0-asr-flash", b.getString("model"))
+        assertTrue(QwenStt.isNative("qwen-audio-3.1-asr-flash")); assertEquals(Prefs.QWEN_ASR, AiProviders.QWEN_ASR_MODELS.first().id)
         assertEquals("input_audio", b.getJSONObject("input").getJSONArray("messages").getJSONObject(0).getJSONArray("content").getJSONObject(0).getString("type"))
         assertEquals("wav", b.getJSONObject("parameters").getString("format"))
         assertEquals("https://ws-hqi4r1h4gr5qrj0f.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",

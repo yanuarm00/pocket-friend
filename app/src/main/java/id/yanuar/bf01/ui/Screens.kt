@@ -695,7 +695,7 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
                 val norm = id.yanuar.bf01.ai.QwenUrl.normalize(qb)
                 if (norm == null) Text(if (qb.isBlank()) "Paste a Base URL, or pick a region." else "That doesn't look like a web address.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                else Text("Region: ${id.yanuar.bf01.ai.QwenUrl.regionName(norm)}\nChat & speech: $norm/chat/completions", style = MaterialTheme.typography.bodySmall)
+                else Text("Region: ${id.yanuar.bf01.ai.QwenUrl.regionName(norm)}\nChat: $norm/chat/completions", style = MaterialTheme.typography.bodySmall)
                 HelpNote(if (custom) "A workspace URL is used exactly as entered. The key must come from that workspace." else "The key must match the region. Test key finds the right region by itself.")
                 ModelPicker(qm) { qm = it; p.qwenModel = it }
                 var am by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.qwenAsrModel) }

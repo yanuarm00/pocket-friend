@@ -34,8 +34,14 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
     var qwenBaseUrl: String get() = plain.getString("qwen_base", QWEN_BASE_INTL) ?: QWEN_BASE_INTL; set(v) = plain.edit().putString("qwen_base", id.yanuar.bf01.ai.QwenUrl.normalize(v) ?: v.trim().trimEnd('/')).apply()
     /** Last custom (workspace) Base URL, so the Custom chip can bring it back. */
     var qwenCustomUrl: String get() = plain.getString("qwen_custom", "") ?: ""; set(v) = plain.edit().putString("qwen_custom", v).apply()
-    var qwenAsrModel: String get() = plain.getString("qwen_asr", QWEN_ASR) ?: QWEN_ASR; set(v) = plain.edit().putString("qwen_asr", v.trim()).apply()
-    var qwenModel: String get() = plain.getString("qwen_model", QWEN_MODEL) ?: QWEN_MODEL; set(v) = plain.edit().putString("qwen_model", v.trim()).apply()
+    var qwenAsrModel: String
+        get() { val m = plain.getString("qwen_asr", QWEN_ASR) ?: QWEN_ASR
+            return if (m in OLD_DEFAULT_ASR && !plain.getBoolean("qwen_asr_picked", false)) QWEN_ASR else m }
+        set(v) = plain.edit().putString("qwen_asr", v.trim()).putBoolean("qwen_asr_picked", true).apply()
+    var qwenModel: String
+        get() { val m = plain.getString("qwen_model", QWEN_MODEL) ?: QWEN_MODEL
+            return if (m in OLD_DEFAULT_MODELS && !plain.getBoolean("qwen_model_picked", false)) QWEN_MODEL else m }
+        set(v) = plain.edit().putString("qwen_model", v.trim()).putBoolean("qwen_model_picked", true).apply()
     /** Token WebSocket; dibuat acak sekali, dikirim ke BF lewat Provision. */
     val wsToken: String get() = secure.getString("ws_token", null) ?: ByteArray(16).also { SecureRandom().nextBytes(it) }
         .joinToString("") { "%02x".format(it) }.also { secure.edit().putString("ws_token", it).apply() }
@@ -95,8 +101,11 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
         // disarankan docs dan bisa diisi manual di Pengaturan.
         const val QWEN_BASE_INTL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" // Singapura (internasional)
         const val QWEN_BASE_CN = "https://dashscope.aliyuncs.com/compatible-mode/v1"        // Beijing (China)
-        const val QWEN_MODEL = "qwen3.8-flash"
-        const val QWEN_ASR = "qwen-audio-3.0-asr-flash"
+        const val QWEN_MODEL = "qwen-flash-character"
+        /** Former defaults: if one is saved but the user never picked it, move to the new default. */
+        val OLD_DEFAULT_MODELS = setOf("qwen-plus", "qwen3.8-flash")
+        const val QWEN_ASR = "qwen-audio-3.1-asr-flash"
+        val OLD_DEFAULT_ASR = setOf("qwen-audio-3.0-asr-flash", "qwen3-asr-flash")
         const val GROK_MODEL = "grok-4.3"
         const val DEFAULT_PERSONA = "Kamu BF, sahabat dekat yang lincah dan ceria. Panggil pengguna \"Mas Yan\". " +
             "Bicara bahasa Indonesia santai seperti teman akrab. Jawab singkat, 1 sampai 3 kalimat, tanpa daftar atau emoji."
