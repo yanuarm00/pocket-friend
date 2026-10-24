@@ -5,7 +5,9 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import id.yanuar.bf01.data.Prefs
 import id.yanuar.bf01.util.Audio
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -23,74 +25,155 @@ interface ChatProvider { suspend fun chat(system: String, history: List<Pair<Str
 /** Mengembalikan PCM mono 16 kHz. */
 interface TtsProvider { suspend fun speak(text: String): ShortArray }
 
-class ApiException(msg: String) : Exception(msg)
+open class ApiException(msg: String) : Exception(msg)
 
-/**
- * xAI. Bentuk endpoint diambil dari docs.x.ai (dibaca 22 Okt 2026):
- *  - STT  POST https://api.x.ai/v1/stt  multipart: file, model=grok-voice-transcribe-2.0, language
- *  - TTS  POST https://api.x.ai/v1/tts  JSON: text, voice_id, language, output_format{codec,sample_rate}
- *  - Chat POST https://api.x.ai/v1/chat/completions (format OpenAI)
- */
-object Xai {
-    const val BASE = "https://api.x.ai/v1"
-    val http: OkHttpClient by lazy { // dibuat sekali (pool koneksi & thread dibagikan ke semua panggilan)
-        OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
-    }
-    fun call(req: Request): ByteArray = http.newCall(req).execute().use { r ->
-        val body = r.body?.bytes() ?: ByteArray(0)
-        if (!r.isSuccessful) throw ApiException("xAI ${r.code}: ${String(body).take(200)}")
-        body
+/** Why an AI call failed, in words a person understands. The key is never part of the message. */
+enum class AiFail { NO_KEY, BAD_KEY, NO_INTERNET, TIMEOUT, QUOTA, BAD_MODEL, DOWN, BAD_REPLY, OTHER }
+class AiError(val kind: AiFail, val provider: String, val code: Int = 0, detail: String = "") :
+    ApiException("$provider ${kind.name}${if (code > 0) " $code" else ""}${if (detail.isNotBlank()) ": $detail" else ""}")
+
+/** Plain-English message for any AI failure, shown in the app. */
+fun friendlyError(e: Throwable): String {
+    val a = e as? AiError ?: classify("AI", e)
+    val p = a.provider
+    return when (a.kind) {
+        AiFail.NO_KEY -> "No $p API key yet. Add one in Settings > AI provider."
+        AiFail.BAD_KEY -> "$p didn't accept the API key. Check it was copied fully, and for Qwen that the key's region matches."
+        AiFail.NO_INTERNET -> "Can't reach $p. Check the phone's internet connection."
+        AiFail.TIMEOUT -> "$p took too long to answer. Try again."
+        AiFail.QUOTA -> "$p says the quota or balance has run out, or too many requests. Check your $p account."
+        AiFail.BAD_MODEL -> "$p doesn't know the chat model name. Check the model in Settings > AI provider."
+        AiFail.DOWN -> "$p is having problems right now (error ${a.code}). Try again in a bit."
+        AiFail.BAD_REPLY -> "$p sent back an empty or unreadable reply. Try again."
+        AiFail.OTHER -> "Something went wrong talking to $p${if (a.code > 0) " (error ${a.code})" else ""}."
     }
 }
 
+internal fun classify(provider: String, e: Throwable): AiError = when (e) {
+    is AiError -> e
+    is java.net.UnknownHostException, is java.net.ConnectException, is java.net.NoRouteToHostException,
+    is javax.net.ssl.SSLException -> AiError(AiFail.NO_INTERNET, provider, detail = e.javaClass.simpleName)
+    is java.io.InterruptedIOException -> AiError(AiFail.TIMEOUT, provider)
+    is org.json.JSONException -> AiError(AiFail.BAD_REPLY, provider)
+    else -> AiError(AiFail.OTHER, provider, detail = e.javaClass.simpleName)
+}
+
+internal fun httpFail(provider: String, code: Int, body: String): AiError {
+    val b = body.lowercase()
+    val kind = when {
+        code == 401 || code == 403 || "invalidapikey" in b || "incorrect api key" in b -> AiFail.BAD_KEY
+        code == 429 || code == 402 || "quota" in b || "arrearage" in b || "insufficient" in b -> AiFail.QUOTA
+        code == 404 || "model" in b && ("not found" in b || "not exist" in b || "does not exist" in b) -> AiFail.BAD_MODEL
+        code == 400 && "api key" in b -> AiFail.BAD_KEY
+        code >= 500 -> AiFail.DOWN
+        else -> AiFail.OTHER
+    }
+    return AiError(kind, provider, code, body.take(160))
+}
+
+/**
+ * xAI. Endpoint shape from docs.x.ai:
+ *  - STT  POST https://api.x.ai/v1/stt  multipart: file, model=grok-voice-transcribe-2.0, language
+ *  - TTS  POST https://api.x.ai/v1/tts  JSON
+ *  - Chat POST https://api.x.ai/v1/chat/completions (OpenAI format)
+ */
+object Xai {
+    const val BASE = "https://api.x.ai/v1"
+    val http: OkHttpClient by lazy {
+        OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(40, TimeUnit.SECONDS).callTimeout(45, TimeUnit.SECONDS).build()
+    }
+    /** All AI HTTP goes through here: always off the main thread, errors classified. */
+    suspend fun call(req: Request, provider: String = "Grok"): ByteArray = withContext(Dispatchers.IO) {
+        try {
+            http.newCall(req).execute().use { r ->
+                val body = r.body?.bytes() ?: ByteArray(0)
+                if (!r.isSuccessful) throw httpFail(provider, r.code, String(body))
+                body
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { throw classify(provider, e) }
+    }
+}
+
+internal fun chatBody(model: String, system: String, history: List<Pair<String, String>>, user: String, maxTokens: Int = 400): JSONObject {
+    val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", system))
+    history.forEach { (r, t) -> msgs.put(JSONObject().put("role", r).put("content", t)) }
+    msgs.put(JSONObject().put("role", "user").put("content", user))
+    val j = JSONObject().put("model", model).put("messages", msgs).put("max_tokens", maxTokens)
+    if (model.startsWith("grok-4.3")) j.put("reasoning_effort", "none") // quick replies; reasoning would eat the token budget
+    return j
+}
+
+internal fun chatReply(provider: String, res: ByteArray): String = try {
+    JSONObject(String(res)).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
+} catch (e: org.json.JSONException) { throw AiError(AiFail.BAD_REPLY, provider) }.ifBlank { throw AiError(AiFail.BAD_REPLY, provider) }
+
 class XaiStt(private val prefs: Prefs) : SttProvider {
     override suspend fun transcribe(pcm16k: ShortArray): String {
+        if (prefs.xaiKey.isBlank()) throw AiError(AiFail.NO_KEY, "Grok")
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("model", "grok-voice-transcribe-2.0")
             .addFormDataPart("language", "id")
             .addFormDataPart("file", "audio.wav", Audio.wav(pcm16k).toRequestBody("audio/wav".toMediaType()))
             .build()
         val res = Xai.call(Request.Builder().url("${Xai.BASE}/stt").header("Authorization", "Bearer ${prefs.xaiKey}").post(body).build())
-        // TODO [BELUM DICEK]: nama field hasil. Diasumsikan {"text": "..."}.
         return JSONObject(String(res)).optString("text").trim()
     }
 }
 
-class XaiChat(private val prefs: Prefs) : ChatProvider {
+class XaiChat(private val prefs: Prefs, private val base: String = Xai.BASE) : ChatProvider {
     override suspend fun chat(system: String, history: List<Pair<String, String>>, user: String): String {
-        val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", system))
-        history.forEach { (r, t) -> msgs.put(JSONObject().put("role", r).put("content", t)) }
-        msgs.put(JSONObject().put("role", "user").put("content", user))
-        // TODO [BELUM DICEK]: nama model default ("grok-4-fast") bisa diubah di Pengaturan.
-        val req = JSONObject().put("model", prefs.chatModel).put("messages", msgs).put("max_tokens", 200)
-        val res = Xai.call(Request.Builder().url("${Xai.BASE}/chat/completions").header("Authorization", "Bearer ${prefs.xaiKey}")
+        if (prefs.xaiKey.isBlank()) throw AiError(AiFail.NO_KEY, "Grok")
+        val req = chatBody(prefs.chatModel, system, history, user)
+        val res = Xai.call(Request.Builder().url("$base/chat/completions").header("Authorization", "Bearer ${prefs.xaiKey}")
             .post(req.toString().toRequestBody("application/json".toMediaType())).build())
-        return JSONObject(String(res)).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content").trim()
+        return chatReply("Grok", res)
     }
 }
 
-/** Chat format OpenAI generik (dipakai Qwen/DashScope compatible-mode). */
+/** Generic OpenAI-format chat (Qwen / DashScope compatible-mode). */
 class OpenAiCompatChat(private val name: String, private val base: () -> String, private val key: () -> String, private val model: () -> String) : ChatProvider {
     override suspend fun chat(system: String, history: List<Pair<String, String>>, user: String): String {
-        if (key().isBlank()) throw ApiException("API key $name belum diisi di Pengaturan")
-        val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", system))
-        history.forEach { (r, t) -> msgs.put(JSONObject().put("role", r).put("content", t)) }
-        msgs.put(JSONObject().put("role", "user").put("content", user))
-        val req = JSONObject().put("model", model()).put("messages", msgs).put("max_tokens", 200)
+        if (key().isBlank()) throw AiError(AiFail.NO_KEY, name)
+        val req = chatBody(model(), system, history, user)
         val r = Request.Builder().url("${base().trimEnd('/')}/chat/completions").header("Authorization", "Bearer ${key()}")
             .post(req.toString().toRequestBody("application/json".toMediaType())).build()
-        val res = Xai.http.newCall(r).execute().use { resp ->
-            val b = resp.body?.bytes() ?: ByteArray(0)
-            if (!resp.isSuccessful) throw ApiException("$name ${resp.code}: ${String(b).take(200)}")
-            b
-        }
-        return JSONObject(String(res)).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content").trim()
+        return chatReply(name, Xai.call(r, name))
     }
 }
 
-/** Pilih otak AI sesuai Pengaturan. */
-fun chatProvider(prefs: Prefs): ChatProvider = if (prefs.llmProvider == "qwen")
-    OpenAiCompatChat("Qwen", { prefs.qwenBaseUrl }, { prefs.qwenKey }, { prefs.qwenModel }) else XaiChat(prefs)
+/**
+ * Qwen with region auto-detect: an international (Singapore) key gets 401 on the China endpoint and vice versa.
+ * Try the saved Base URL first; on BAD_KEY try the other region once and remember the one that works.
+ * A custom (workspace) Base URL is used as is.
+ */
+class QwenChat(private val prefs: Prefs) : ChatProvider {
+    override suspend fun chat(system: String, history: List<Pair<String, String>>, user: String): String =
+        qwenWithRegion(prefs) { base -> OpenAiCompatChat("Qwen", { base }, { prefs.qwenKey }, { prefs.qwenModel }).chat(system, history, user) }
+}
+
+internal suspend fun <T> qwenWithRegion(prefs: Prefs, block: suspend (String) -> T): T {
+    if (prefs.qwenKey.isBlank()) throw AiError(AiFail.NO_KEY, "Qwen")
+    val first = prefs.qwenBaseUrl.trimEnd('/')
+    val other = when (first) { Prefs.QWEN_BASE_INTL -> Prefs.QWEN_BASE_CN; Prefs.QWEN_BASE_CN -> Prefs.QWEN_BASE_INTL; else -> null }
+    return try { block(first) } catch (e: AiError) {
+        if (e.kind != AiFail.BAD_KEY || other == null) throw e
+        val r = try { block(other) } catch (e2: AiError) { throw e } // both regions failed: report the first (saved) region's reason
+        prefs.qwenBaseUrl = other; r
+    }
+}
+
+fun qwenRegionName(base: String): String = when (base.trimEnd('/')) {
+    Prefs.QWEN_BASE_INTL -> "International (Singapore)"; Prefs.QWEN_BASE_CN -> "China (Beijing)"; else -> "Custom URL" }
+
+/** Choose the AI brain from Settings. */
+fun chatProvider(prefs: Prefs): ChatProvider = if (prefs.llmProvider == "qwen") QwenChat(prefs) else XaiChat(prefs)
+
+/** "Test key": one tiny chat request. Returns a line to show, e.g. "Connected · Qwen · International (Singapore)". */
+suspend fun testKey(prefs: Prefs, provider: ChatProvider = chatProvider(prefs)): Result<String> = runCatching {
+    provider.chat("Reply with one word: OK", emptyList(), "ping")
+    if (prefs.llmProvider == "qwen") "Connected · Qwen · ${qwenRegionName(prefs.qwenBaseUrl)} · ${prefs.qwenModel}"
+    else "Connected · Grok · ${prefs.chatModel}"
+}
 
 /**
  * Qwen3-ASR-Flash lewat DashScope compatible-mode (dicek di dokumen resmi Alibaba Cloud Model Studio, 23 Okt 2026):
@@ -111,15 +194,12 @@ class QwenStt(private val prefs: Prefs) : SttProvider {
             JSONObject(res).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
     }
     override suspend fun transcribe(pcm16k: ShortArray): String {
-        if (prefs.qwenKey.isBlank()) throw ApiException("API key Qwen belum diisi di Setelan")
-        val r = Request.Builder().url("${prefs.qwenBaseUrl.trimEnd('/')}/chat/completions").header("Authorization", "Bearer ${prefs.qwenKey}")
-            .post(body(Audio.wav(pcm16k)).toString().toRequestBody("application/json".toMediaType())).build()
-        val res = Xai.http.newCall(r).execute().use { resp ->
-            val b = resp.body?.bytes() ?: ByteArray(0)
-            if (!resp.isSuccessful) throw ApiException("Qwen ASR ${resp.code}: ${String(b).take(200)}")
-            b
+        val body = body(Audio.wav(pcm16k)).toString()
+        return qwenWithRegion(prefs) { base ->
+            val r = Request.Builder().url("$base/chat/completions").header("Authorization", "Bearer ${prefs.qwenKey}")
+                .post(body.toRequestBody("application/json".toMediaType())).build()
+            parse(String(Xai.call(r, "Qwen")))
         }
-        return parse(String(res))
     }
 }
 

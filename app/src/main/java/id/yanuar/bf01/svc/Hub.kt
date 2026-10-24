@@ -27,6 +27,11 @@ class Hub internal constructor(val ctx: Context, val prefs: Prefs = Prefs(ctx)) 
     @Volatile private var nextIsTask = false
     /** Diisi NotificationListener untuk perintah media dari BF. */
     var mediaCommand: ((String) -> Unit)? = null
+    /** Last music/nav lines, re-sent when BF (re)connects so JAM ON / TAKE ME aren't empty after sleep. */
+    @Volatile var lastMedia: ByteArray? = null
+    @Volatile var lastNav: ByteArray? = null
+    fun sendLive(b: ByteArray, nav: Boolean) { if (nav) lastNav = b else lastMedia = b
+        if (forwarding) scope.launch { ble.write(BfProtocol.NOTIFY, b) } }
 
     fun log(s: String) { Log.i("BF", s); log.value = (log.value + s).takeLast(50) }
 
@@ -41,8 +46,8 @@ class Hub internal constructor(val ctx: Context, val prefs: Prefs = Prefs(ctx)) 
             onStt(text)
             if (text.isBlank()) return null
             if (nextIsTask) { nextIsTask = false; return makeTask(text, onReply) }
-            db.addChat("user", text)
             val history = db.chatHistory(12).map { (if (it.role == "user") "user" else "assistant") to it.text }
+            db.addChat("user", text)
             val reply = chatProvider(prefs).chat(systemPrompt(), history, text)
             db.addUsage(chat = 1); db.addChat("assistant", reply); db.trimChat(); revision.value++; autoMemory.onChatActivity()
             onReply(reply)
@@ -74,14 +79,14 @@ class Hub internal constructor(val ctx: Context, val prefs: Prefs = Prefs(ctx)) 
         return pcm
     }
 
-    /** Ngobrol lewat ketikan dari HP (otak AI sama dengan suara). */
-    suspend fun chatText(text: String): String {
-        db.addChat("user", text)
-        // Ambil riwayat langsung dari DB tanpa menarik 200 baris ke memori.
+    /** Typed chat from the phone (same AI brain as voice). Runs off the main thread; throws AiError on failure.
+     *  The user's message is saved only together with the reply, so a failed send can be retried without duplicates. */
+    suspend fun chatText(text: String): String = withContext(Dispatchers.IO) {
         val history = db.chatHistory(12).map { (if (it.role == "user") "user" else "assistant") to it.text }
-        val reply = chatProvider(prefs).chat(systemPrompt(), history, text)
-        db.addUsage(chat = 1); db.addChat("assistant", reply); db.trimChat(); revision.value++; autoMemory.onChatActivity()
-        return reply
+        val reply = try { chatProvider(prefs).chat(systemPrompt(), history, text) }
+            catch (e: CancellationException) { throw e } catch (e: Exception) { log("Chat failed: ${friendlyError(e)}"); throw e }
+        db.addChat("user", text); db.addUsage(chat = 1); db.addChat("assistant", reply); db.trimChat(); revision.value++; autoMemory.onChatActivity()
+        reply
     }
 
     fun systemPrompt(): String {
@@ -114,7 +119,8 @@ class Hub internal constructor(val ctx: Context, val prefs: Prefs = Prefs(ctx)) 
     @Synchronized fun start() {
         if (started || !prefs.linkEnabled) return; started = true
         server.start()
-        ble.onReady = { syncAll(); recordings.onConnected() }
+        ble.onReady = { syncAll(); recordings.onConnected()
+            if (!forwardPaused.value) scope.launch { lastMedia?.let { ble.write(BfProtocol.NOTIFY, it) }; lastNav?.let { ble.write(BfProtocol.NOTIFY, it) } } }
         ble.onDisconnected = { LastLocation.save(ctx, prefs); log("BF disconnected (asleep/out of range). Last location saved.") }
         prefs.deviceAddress?.let { ble.connect(it) }
         if (collectors) return; collectors = true

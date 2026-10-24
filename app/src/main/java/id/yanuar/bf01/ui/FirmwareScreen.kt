@@ -73,7 +73,7 @@ import kotlinx.coroutines.withContext
                 }
             }
             if (info != null && !appOta) HelpNote("This BF needs a one-time cable flash to v${FirmwareImage.MIN_OTA_FW}",
-                "Old firmware can't take updates from the app. Flash bf01-firmware-merged-v${FirmwareImage.LATEST}.bin at address 0x0 (see docs/FLASHING.md in the firmware repo). After that, later updates can run from here.")
+                "Old firmware can't take updates from the app. Flash bf01-firmware-merged-v${FirmwareImage.LATEST}.bin at address 0x0 over USB, for example with the ESP web flasher. After that, later updates can run from here.")
         }
 
         Section("Firmware file") {

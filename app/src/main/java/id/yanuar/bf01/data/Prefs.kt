@@ -10,17 +10,26 @@ import java.security.SecureRandom
 /** `secureOverride` hanya untuk tes JVM (Robolectric tidak punya Keystore). */
 class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
     private val plain: SharedPreferences = ctx.getSharedPreferences("bf01", Context.MODE_PRIVATE)
-    private val secure: SharedPreferences = secureOverride ?: EncryptedSharedPreferences.create(
-        ctx, "bf01_secure",
-        MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+    /** true when the encrypted store could not be opened/decrypted (e.g. restored from a backup or keystore lost) and was reset:
+     *  saved keys are gone and the user must re-enter them. */
+    var secureWasReset = false; private set
+    private val secure: SharedPreferences = secureOverride ?: openSecure(ctx)
+    private fun openSecure(ctx: Context): SharedPreferences {
+        fun make() = EncryptedSharedPreferences.create(ctx, "bf01_secure",
+            MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+        return try { make() } catch (e: Exception) {
+            secureWasReset = true; ctx.deleteSharedPreferences("bf01_secure"); make() }
+    }
+    private fun secret(k: String): String = try { secure.getString(k, "") ?: "" } catch (e: Exception) { secureWasReset = true; "" }
 
-    var xaiKey: String get() = secure.getString("xai_key", "") ?: ""; set(v) = secure.edit().putString("xai_key", v.trim()).apply()
+    var xaiKey: String get() = secret("xai_key"); set(v) = secure.edit().putString("xai_key", v.trim()).apply()
     /** Key Qwen (Alibaba Cloud Model Studio / DashScope), terpisah dari key xAI. Terikat ke region tempat key dibuat. */
-    var qwenKey: String get() = secure.getString("qwen_key", "") ?: ""; set(v) = secure.edit().putString("qwen_key", v.trim()).apply()
+    var qwenKey: String get() = secret("qwen_key"); set(v) = secure.edit().putString("qwen_key", v.trim()).apply()
     /** Penyedia AI: "grok" (xAI) atau "qwen" (DashScope), dipakai untuk STT, chat, dan TTS. */
-    var llmProvider: String get() = plain.getString("llm", "grok") ?: "grok"; set(v) = plain.edit().putString("llm", v).apply()
+    /** If never chosen and only a Qwen key exists, Qwen is the active provider. */
+    var llmProvider: String get() = plain.getString("llm", null) ?: (if (qwenKey.isNotBlank() && xaiKey.isBlank()) "qwen" else "grok"); set(v) = plain.edit().putString("llm", v).apply()
     var qwenBaseUrl: String get() = plain.getString("qwen_base", QWEN_BASE_INTL) ?: QWEN_BASE_INTL; set(v) = plain.edit().putString("qwen_base", v.trim().trimEnd('/')).apply()
     var qwenModel: String get() = plain.getString("qwen_model", QWEN_MODEL) ?: QWEN_MODEL; set(v) = plain.edit().putString("qwen_model", v.trim()).apply()
     /** Token WebSocket; dibuat acak sekali, dikirim ke BF lewat Provision. */
@@ -42,7 +51,8 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
 
     var sttProvider: String get() = plain.getString("stt", "xai") ?: "xai"; set(v) = plain.edit().putString("stt", v).apply()
     var ttsProvider: String get() = plain.getString("tts", "xai") ?: "xai"; set(v) = plain.edit().putString("tts", v).apply()
-    var chatModel: String get() = plain.getString("model", "grok-4-fast") ?: "grok-4-fast"; set(v) = plain.edit().putString("model", v).apply()
+    // "grok-4-fast" was retired by xAI on 15 May 2026 (redirects to grok-4.3); old saved value is migrated.
+    var chatModel: String get() = (plain.getString("model", GROK_MODEL) ?: GROK_MODEL).let { if (it.isBlank() || it.startsWith("grok-4-fast")) GROK_MODEL else it }; set(v) = plain.edit().putString("model", v).apply()
     var ttsVoice: String get() = plain.getString("voice", "eve") ?: "eve"; set(v) = plain.edit().putString("voice", v).apply()
     var modeCepat: Boolean get() = plain.getBoolean("fast", false); set(v) = plain.edit().putBoolean("fast", v).apply()
     var sleepSec: Int get() = plain.getInt("sleep", 60); set(v) = plain.edit().putInt("sleep", v.coerceIn(15, 3600)).apply()
@@ -50,6 +60,9 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
     var quietEnd: Int get() = plain.getInt("q_end", 6); set(v) = plain.edit().putInt("q_end", v).apply()
     /** Plafon bulanan dalam MENIT AUDIO (bukan uang; harga tidak di-hardcode). 0 = tanpa batas. */
     var monthlyCapMin: Int get() = plain.getInt("cap", 300); set(v) = plain.edit().putInt("cap", v).apply()
+    var musicEnabled: Boolean get() = plain.getBoolean("music", true); set(v) = plain.edit().putBoolean("music", v).apply()
+    /** Last battery % seen from BF (-1 = never), shown while disconnected. */
+    var lastBatt: Int get() = plain.getInt("last_batt", -1); set(v) = plain.edit().putInt("last_batt", v).apply()
     var navEnabled: Boolean get() = plain.getBoolean("nav", true); set(v) = plain.edit().putBoolean("nav", v).apply()
 
     /** Nama panggilan AI (default "BF"), dipakai di UI app dan di prompt persona. */
@@ -79,6 +92,7 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
         const val QWEN_BASE_INTL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" // Singapura (internasional)
         const val QWEN_BASE_CN = "https://dashscope.aliyuncs.com/compatible-mode/v1"        // Beijing (China)
         const val QWEN_MODEL = "qwen-plus"
+        const val GROK_MODEL = "grok-4.3"
         const val DEFAULT_PERSONA = "Kamu BF, sahabat dekat yang lincah dan ceria. Panggil pengguna \"Mas Yan\". " +
             "Bicara bahasa Indonesia santai seperti teman akrab. Jawab singkat, 1 sampai 3 kalimat, tanpa daftar atau emoji."
         /** Menu v7: 6 item, 3 halaman × 2 tombol. */

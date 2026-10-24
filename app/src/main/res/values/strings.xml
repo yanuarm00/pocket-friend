@@ -19,7 +19,7 @@
     <string name="t_ai">AI provider</string>
     <string name="t_voice">BF &amp; voice</string>
     <string name="t_network">Connection &amp; network</string>
-    <string name="t_perms">Notifications &amp; permissions</string>
+    <string name="t_perms">Music, Maps &amp; alerts</string>
     <string name="t_device">Device</string>
     <string name="t_usage">Usage &amp; about</string>
     <string name="t_firmware">Firmware update</string>

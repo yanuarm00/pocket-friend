@@ -2,6 +2,9 @@ package id.yanuar.bf01.ui
 
 import androidx.compose.foundation.lazy.items
 import android.annotation.SuppressLint
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.shape.CircleShape
 import android.bluetooth.le.ScanResult
 import android.companion.AssociationRequest
 import android.companion.BluetoothLeDeviceFilter
@@ -23,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,17 +88,18 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
         val ready = st == BleManager.State.READY
         val linked by hub.linked.collectAsState()
         Section("Device") {
+            val batt = rememberBattery(hub, ready)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val bs = rememberBfStatus(hub); BfFace(44.dp, bs.mood, bs.filled, color = MaterialTheme.colorScheme.onSurface)
+                val bs = rememberBfStatus(hub); BfFace(48.dp, bs.mood, bs.filled, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     DotText(linkLabel(linked, st), Dot.S, 1.1f)
-                    Spacer(Modifier.height(6.dp))
-                    HelpNote(if (!linked) "BF stays disconnected until you tap Connect."
-                        else if (ready) "BF is ready to chat" else "Waiting for BF. Press PWR on BF if it is asleep.")
+                    Text(batt, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
-                info?.batt?.takeIf { it >= 0 }?.let { DotText("$it%", Dot.L, 1.2f) }
             }
+            HelpNote(if (!linked) "BF stays disconnected until you tap Connect."
+                else if (ready) "BF is ready to chat." else "Waiting for BF. Press PWR on BF if it is asleep.")
             info?.let { i -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AssistChip({}, { Text("FW ${i.fw}") })
                 AssistChip({}, { Text(if (i.sd) "Memory card ${"%.1f".format(i.sdFreeMb / 1024f)} GB free" else "No memory card") })
@@ -311,11 +316,21 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
     var msg by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }; var busy by remember { mutableStateOf(false) }; var more by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope(); val cs = MaterialTheme.colorScheme; val ai = hub.prefs.aiName
-    fun send(text: String) { val m = text.trim(); if (m.isNotEmpty() && !busy) { msg = ""; busy = true
-        scope.launch { runCatching { hub.chatText(m) }.onFailure { hub.log("Chat failed: ${it.message}") }; busy = false; r++ } } }
-    val empty = chat?.isEmpty() == true && !busy
+    // pending = the message waiting for a reply (or that failed); err = plain-English reason, shown with Retry.
+    var pending by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var err by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }; val listScroll = rememberScrollState()
+    fun send(text: String) { val m = text.trim(); if (m.isNotEmpty() && !busy) { msg = ""; busy = true; pending = m; err = ""
+        runCatching { focus.requestFocus() }
+        scope.launch {
+            try { hub.chatText(m); pending = "" }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { err = id.yanuar.bf01.ai.friendlyError(e) }
+            finally { busy = false; r++ } } } }
+    val empty = chat?.isEmpty() == true && !busy && pending.isEmpty()
     Column(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        LaunchedEffect(chat?.size, pending, busy, err) { listScroll.animateScrollTo(listScroll.maxValue) }
+        Column(Modifier.weight(1f).verticalScroll(listScroll), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (empty) Spacer(Modifier.height(28.dp))
             // Greeting speech bubble (always with a tail); the persona & memory dropdown sits inside at its bottom.
             BubbleCard(Modifier.fillMaxWidth(), tail = 18.dp) {
@@ -374,19 +389,57 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
                 ChatBubble(c.text, fromBf = c.role != "user",
                     header = (if (c.role == "user") "Mas Yan" else ai) + " · " + fmtClock.format(Date(c.time)))
             }
-            if (busy) DotText("${ai.uppercase()} THINKING...", Dot.S, 1f, color = cs.onSurfaceVariant)
+            if (pending.isNotEmpty()) ChatBubble(pending, fromBf = false, header = "Mas Yan" + if (err.isNotEmpty()) " · not sent" else "")
+            if (busy) ThinkingBubble(ai)
+            if (err.isNotEmpty() && !busy) ChatErrorCard(err, onRetry = { send(pending) }, onDismiss = { msg = pending; pending = ""; err = "" })
         }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(msg, { msg = it }, Modifier.weight(1f), placeholder = { Text(stringResource(R.string.ask_hint, ai)) }, shape = MaterialTheme.shapes.extraLarge, maxLines = 3)
+            OutlinedTextField(msg, { msg = it }, Modifier.weight(1f).focusRequester(focus), placeholder = { Text(stringResource(R.string.ask_hint, ai)) }, shape = MaterialTheme.shapes.extraLarge, maxLines = 3)
             Spacer(Modifier.width(10.dp))
-            FloatingActionButton({ send(msg) }) { Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send, stringResource(R.string.send)) }
+            // Not focusable, so tapping Send keeps the keyboard and focus on the text field.
+            FloatingActionButton({ send(msg) }, Modifier.focusProperties { canFocus = false }) { Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send, stringResource(R.string.send)) }
         }
     }
     if (confirmClear) AlertDialog({ confirmClear = false }, icon = { Icon(Sym.DeleteSweep, null) }, title = { Text(stringResource(R.string.ask_clear_q)) },
         text = { Text(stringResource(R.string.ask_clear_note, ai)) },
         confirmButton = { TextButton({ hub.db.clearChat(); r++; confirmClear = false }) { Text(stringResource(R.string.delete)) } },
         dismissButton = { TextButton({ confirmClear = false }) { Text(stringResource(R.string.cancel)) } })
+}
+
+/** "BF is thinking…" bubble with animated dots while the AI answers. */
+@Composable fun ThinkingBubble(ai: String) {
+    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "think")
+    val n by t.animateFloat(0f, 3.99f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1200)), label = "dots")
+    ChatBubble("$ai is thinking" + ".".repeat(n.toInt()), fromBf = true, header = ai)
+}
+
+/** Visible error under the chat, with Retry. */
+@Composable fun ChatErrorCard(text: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = cs.errorContainer, contentColor = cs.onErrorContainer) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(androidx.compose.material.icons.Icons.Filled.Warning, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                Text("No reply", style = MaterialTheme.typography.titleSmall) }
+            Text(text, style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onRetry, Modifier.weight(1f).heightIn(min = 48.dp)) { Icon(Sym.RestartAlt, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Retry", maxLines = 1) }
+                OutlinedButton(onDismiss, Modifier.weight(1f).heightIn(min = 48.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = cs.onErrorContainer),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, cs.onErrorContainer.copy(alpha = 0.5f))) { Text("Edit", maxLines = 1) }
+            }
+        }
+    }
+}
+
+/** "Test key" button + result line (Connected / failed with reason). */
+@Composable fun TestKeyRow(hub: Hub, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope(); var busy by remember { mutableStateOf(false) }; var res by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    ActionButton(if (busy) "Testing…" else "Test key", enabled = !busy, icon = Sym.SmartToy) { busy = true; res = null
+        scope.launch { val r = id.yanuar.bf01.ai.testKey(hub.prefs)
+            res = r.fold({ true to it }, { false to "Failed · " + id.yanuar.bf01.ai.friendlyError(it) }); busy = false; onDone() } }
+    res?.let { (ok, t) -> Text(t, style = MaterialTheme.typography.bodyMedium,
+        color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
 }
 
 @Composable fun KartuScreen(hub: Hub) {
@@ -489,6 +542,31 @@ fun linkLabel(linked: Boolean, st: BleManager.State) = when {
     !linked -> "DISCONNECTED"; st == BleManager.State.READY -> "CONNECTED"; else -> "CONNECTING"
 }
 
+fun notifAccessGranted(ctx: android.content.Context): Boolean =
+    androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+
+/** Onboarding card: music (JAM ON) and Maps (TAKE ME) need notification access. Status refreshes when coming back from Settings. */
+@Composable fun NotifAccessCard() {
+    val ctx = LocalContext.current; var ok by remember { mutableStateOf(notifAccessGranted(ctx)) }
+    val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(owner) { val o = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) ok = notifAccessGranted(ctx) }
+        owner.lifecycle.addObserver(o); onDispose { owner.lifecycle.removeObserver(o) } }
+    val cs = MaterialTheme.colorScheme
+    Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = if (ok) cs.surfaceContainerHigh else cs.errorContainer,
+        contentColor = if (ok) cs.onSurface else cs.onErrorContainer) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Sym.Notifications, null, Modifier.size(22.dp)); Spacer(Modifier.width(10.dp))
+                Text(if (ok) "Notification access: on" else "Allow notification access", style = MaterialTheme.typography.titleSmall) }
+            Text(if (ok) "JAM ON shows your music and TAKE ME shows Google Maps directions on BF."
+                else "Needed for music (JAM ON) and Google Maps directions (TAKE ME) on BF. Only music and Maps are read.",
+                style = MaterialTheme.typography.bodyMedium)
+            if (!ok) Button({ ctx.startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text("Open settings", maxLines = 1) }
+        }
+    }
+}
+
 /** Sakelar besar Sambungkan/Putuskan (tersimpan, tetap berlaku setelah app ditutup / HP restart). */
 @Composable fun LinkToggle(hub: Hub, linked: Boolean) {
     if (linked) OutlinedButton({ hub.disconnectAll() }, Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Disconnect") }
@@ -502,6 +580,7 @@ fun linkLabel(linked: Boolean, st: BleManager.State) = when {
     val usage = rememberLoaded(hub, "pemakaian") { hub.db.usageThisMonth() }
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         WheresMineCard(hub)
+        NotifAccessCard()
         NavCard {
             NavRow(Sym.SmartToy, "AI provider", (if (p.llmProvider == "qwen") "Qwen · " + (if (p.qwenKey.isBlank()) "no key yet" else "key saved")
                 else "Grok · " + (if (p.xaiKey.isBlank()) "no key yet" else "key saved"))) { open(Screen.SetAi) }
@@ -510,7 +589,7 @@ fun linkLabel(linked: Boolean, st: BleManager.State) = when {
             NavDivider()
             NavRow(Sym.Bluetooth, "Connection & network", "${linkLabel(linked, st).lowercase().replaceFirstChar { it.uppercase() }} · Wi-Fi, phone server") { open(Screen.SetJaringan) }
             NavDivider()
-            NavRow(Sym.Notifications, "Notifications & permissions", "Maps & music to BF ${if (paused) "paused" else "on"}") { open(Screen.SetIzin) }
+            NavRow(Sym.Notifications, "Music, Maps & alerts", "What BF can show from your phone") { open(Screen.SetIzin) }
             NavDivider()
             NavRow(Sym.DeveloperBoard, "Device", "Pairing, name card, BF menu, files") { open(Screen.SetPerangkat) }
             NavDivider()
@@ -592,13 +671,15 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
                 Text(if (p.qwenKey.isBlank()) "Not set" else "Saved encrypted (…${p.qwenKey.takeLast(4)})")
                 OutlinedTextField(qk, { qk = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("API key (DashScope)") },
                     visualTransformation = PasswordVisualTransformation(), shape = MaterialTheme.shapes.large)
-                ActionButton("Save", enabled = qk.isNotBlank(), icon = Sym.Save) { p.qwenKey = qk.trim(); qk = ""; r++ }
+                ActionButton("Save", enabled = qk.isNotBlank(), icon = Sym.Save) { p.qwenKey = qk.trim(); p.llmProvider = "qwen"; qk = ""; r++ }
+                if (p.secureWasReset && p.qwenKey.isBlank()) Text("Your saved key couldn't be read on this phone. Please re-enter your key.", color = MaterialTheme.colorScheme.error)
+                if (p.qwenKey.isNotBlank()) TestKeyRow(hub) { qb = p.qwenBaseUrl; r++ }
             }
             Section("Region & model") {
                 Row { FilterChip(qb == Prefs.QWEN_BASE_INTL, { qb = Prefs.QWEN_BASE_INTL; p.qwenBaseUrl = qb }, { Text("International") })
                     Spacer(Modifier.width(8.dp)); FilterChip(qb == Prefs.QWEN_BASE_CN, { qb = Prefs.QWEN_BASE_CN; p.qwenBaseUrl = qb }, { Text("China") }) }
                 OutlinedTextField(qb, { qb = it; p.qwenBaseUrl = it }, Modifier.fillMaxWidth(), label = { Text("Base URL") }, shape = MaterialTheme.shapes.large)
-                HelpNote("The key must come from the same region as the Base URL.")
+                HelpNote("The key must match the region. Test key finds the right region by itself.")
                 OutlinedTextField(qm, { qm = it; p.qwenModel = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Chat model") }, shape = MaterialTheme.shapes.large)
                 HelpNote("Speech recognition: ${QwenStt.MODEL} (Indonesian).")
             }
@@ -608,7 +689,9 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
                 Text(if (p.xaiKey.isBlank()) "Not set" else "Saved encrypted (…${p.xaiKey.takeLast(4)})")
                 OutlinedTextField(xk, { xk = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("xAI API key") },
                     visualTransformation = PasswordVisualTransformation(), shape = MaterialTheme.shapes.large)
-                ActionButton("Save", enabled = xk.isNotBlank(), icon = Sym.Save) { p.xaiKey = xk.trim(); xk = ""; r++ }
+                ActionButton("Save", enabled = xk.isNotBlank(), icon = Sym.Save) { p.xaiKey = xk.trim(); p.llmProvider = "grok"; xk = ""; r++ }
+                if (p.secureWasReset && p.xaiKey.isBlank()) Text("Your saved key couldn't be read on this phone. Please re-enter your key.", color = MaterialTheme.colorScheme.error)
+                if (p.xaiKey.isNotBlank()) TestKeyRow(hub) { r++ }
             }
             Section("Model") {
                 OutlinedTextField(model, { model = it; p.chatModel = it.trim() }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Grok chat model") }, shape = MaterialTheme.shapes.large)
@@ -689,17 +772,51 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
 @Composable fun SetIzinScreen(hub: Hub) {
     val p = hub.prefs; val ctx = LocalContext.current; var r by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     val linked by hub.linked.collectAsState(); val paused by hub.forwardPaused.collectAsState()
+    var notif by remember { mutableStateOf(notifAccessGranted(ctx)) }; var dnd by remember { mutableStateOf(dndAccessGranted(ctx)) }
+    val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(owner) { val o = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) { notif = notifAccessGranted(ctx); dnd = dndAccessGranted(ctx) } }
+        owner.lifecycle.addObserver(o); onDispose { owner.lifecycle.removeObserver(o) } }
     SubPage {
-        Section("Forward to BF") {
-            Toggle("Pause forwarding", paused, sub = "Maps navigation & music info are not forwarded.", enabled = linked) { hub.setForwardPaused(it) }
-            key(r) { Toggle("Navigation from Google Maps", p.navEnabled) { p.navEnabled = it; r++ } }
+        Section("Permissions") {
+            HelpNote("Android asks for these once. Tap an item to open its system setting.")
+            PermRow("Notification access", "Lets BF show the song playing (JAM ON) and Google Maps directions (TAKE ME).", notif) {
+                ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+            PermRow("Do Not Disturb access", "Lets Find Phone ring even when the phone is on silent.", dnd) {
+                ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
         }
-        NavCard {
-            NavRow(Sym.Notifications, "Notification access", "Only Google Maps notifications are read") { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-            NavDivider()
-            NavRow(Sym.NotificationsActive, "Do Not Disturb access", "So Find Phone still rings") { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+        Section("Show on BF") {
+            key(r) {
+                Toggle("Music on JAM ON", p.musicEnabled, sub = if (notif) "Song title, artist and play/pause from BF" else "Needs notification access", enabled = notif) { p.musicEnabled = it; r++ }
+                Toggle("Maps directions on TAKE ME", p.navEnabled, sub = if (notif) "Next turn, distance and arrival time from Google Maps" else "Needs notification access", enabled = notif) { p.navEnabled = it; r++ }
+            }
+            Toggle("Pause both for now", paused, sub = if (linked) "Stops sending music and directions until you turn this off" else "Connect BF first", enabled = linked) { hub.setForwardPaused(it) }
         }
     }
+}
+
+fun dndAccessGranted(ctx: android.content.Context): Boolean =
+    (ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).isNotificationPolicyAccessGranted
+
+/** Permission row: title, one-line purpose, On/Off status, opens the system setting. */
+@Composable fun PermRow(title: String, why: String, granted: Boolean, open: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable(onClick = open).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(why, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        Surface(shape = CircleShape, color = if (granted) cs.primary else cs.errorContainer, contentColor = if (granted) cs.onPrimary else cs.onErrorContainer) {
+            Text(if (granted) "On" else "Off", Modifier.padding(horizontal = 12.dp, vertical = 4.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1) }
+    }
+}
+
+/** Battery text: live value, else last known, else "Unknown". Saves the live value. */
+@Composable fun rememberBattery(hub: Hub, ready: Boolean): String {
+    val info by hub.ble.info.collectAsState()
+    val live = info?.batt?.takeIf { it >= 0 && ready }
+    LaunchedEffect(live) { live?.let { hub.prefs.lastBatt = it } }
+    return when { live != null -> "Battery $live%"; hub.prefs.lastBatt >= 0 -> "Battery ${hub.prefs.lastBatt}% (last known)"; else -> "Battery unknown" }
 }
 
 @Composable fun SetPerangkatScreen(hub: Hub, open: (Screen) -> Unit) {

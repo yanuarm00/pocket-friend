@@ -15,6 +15,8 @@ No ads, no analytics, no telemetry. API keys are stored encrypted on your phone 
 
 ## Install the APK
 
+Latest version: **v0.3.4**. Direct download (always the newest build): [PocketFriend.apk](https://github.com/yanuarm00/pocket-friend/releases/latest/download/PocketFriend.apk)
+
 1. Download the latest `PocketFriend-*.apk` from [Releases](https://github.com/yanuarm00/pocket-friend/releases).
 2. Open the file on your Android phone (Android 8.0 or newer) and allow "install from unknown sources" when asked.
 3. If Google Play Protect warns you, tap *More details → Install anyway* (the app is not on the Play Store).

@@ -90,15 +90,19 @@ enum class BfStatus(@androidx.annotation.StringRes val label: Int, val mood: BfM
                     }
                 }
                 val b = info?.batt?.takeIf { it >= 0 && status == BfStatus.On }
+                LaunchedEffect(b) { b?.let { hub.prefs.lastBatt = it } }
+                val last = hub.prefs.lastBatt
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.battery), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    Text(b?.let { "$it%" } ?: "–", style = MaterialTheme.typography.titleLarge)
+                    Text(b?.let { "$it%" } ?: if (last >= 0) "$last% · last known" else "Unknown",
+                        style = if (b != null) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium, maxLines = 1)
                 }
                 info?.takeIf { status == BfStatus.On }?.let { Text(stringResource(R.string.firmware_x, it.fw), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActionButton(stringResource(R.string.reconnect), Modifier.weight(1f), primary = status != BfStatus.On, icon = Sym.Bluetooth) { hub.reconnect(); dismiss() }
-                    OutlinedButton({ hub.disconnectAll(); dismiss() }, Modifier.weight(1f).heightIn(min = 48.dp), enabled = linked) {
-                        Icon(Sym.BluetoothOff, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.disconnect), maxLines = 1) }
+                // Stacked full-width buttons: never wrap or truncate, even with large font sizes.
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ActionButton(stringResource(R.string.reconnect), Modifier.fillMaxWidth(), primary = status != BfStatus.On, icon = Sym.Refresh) { hub.reconnect(); dismiss() }
+                    if (linked) OutlinedButton({ hub.disconnectAll(); dismiss() }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Icon(Sym.BluetoothOff, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.disconnect), maxLines = 1, softWrap = false) }
                 }
                 // Grab handle: swipe up to close.
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

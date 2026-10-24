@@ -84,6 +84,6 @@ class StateRestoreTest {
         rule.setContent { PocketFriendTheme(true) { App(h, Screen.Tugas) } }
         rule.onNodeWithContentDescription("Status BF OFF", substring = true).performClick()
         rule.onNodeWithText("Reconnect").assertExists()
-        rule.onNodeWithText("Disconnect").assertIsNotEnabled()
+        rule.onNodeWithText("Disconnect").assertDoesNotExist()  // v0.3.4: hidden while unlinked
     }
 }

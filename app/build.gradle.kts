@@ -16,8 +16,8 @@ android {
         applicationId = "id.yanuarmoo.pocketfriend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.3.3"
+        versionCode = 16
+        versionName = "0.3.4"
     }
     // Signing rilis: dibaca dari env (PF_KEYSTORE, PF_KEYSTORE_PASSWORD, PF_KEY_ALIAS, PF_KEY_PASSWORD)
     // atau dari local.properties (pf.keystore, pf.keystorePassword, pf.keyAlias, pf.keyPassword). Rahasia TIDAK di repo.
@@ -68,6 +68,8 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("io.github.jaredmdobson:concentus:1.0.2")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
     testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.46.1")
