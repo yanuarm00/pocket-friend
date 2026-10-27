@@ -13,7 +13,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Screenshot JVM (Robolectric + Roborazzi), Samsung A53: 411x914 dp @ 420 dpi ≈ 1080x2400. Hasil: screens_pf/<n>_<layar>_<dark|light>.png */
+/** Screenshot JVM (Robolectric + Roborazzi), Samsung A53: 411x914 dp @ 420 dpi ≈ 1080x2400. Hasil: docs/archive/screens_pf/<n>_<layar>_<dark|light>.png */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w411dp-h914dp-420dpi")
@@ -62,7 +62,7 @@ class ScreenshotTest(private val screen: Screen, private val dark: Boolean) {
     @Test fun capture() {
         val hub = sampleHub()
         val n = listOf(Screen.Beranda, Screen.Ngobrol, Screen.Tugas, Screen.Catatan, Screen.Pengaturan, Screen.File).indexOf(screen) + 1
-        captureRoboImage("../screens_pf/${n}_${screen.name}_${if (dark) "dark" else "light"}.png") { PocketFriendTheme(dark) { App(hub, screen) } }
+        captureRoboImage("../docs/archive/screens_pf/${n}_${screen.name}_${if (dark) "dark" else "light"}.png") { PocketFriendTheme(dark) { App(hub, screen) } }
     }
 
     /** Target utama: Samsung Galaxy A53 (1080x2400, 411x914 dp, ~420 dpi). Cek fontScale 1.0 / 1.15 / 1.3.
@@ -75,10 +75,10 @@ class ScreenshotTest(private val screen: Screen, private val dark: Boolean) {
             org.robolectric.RuntimeEnvironment.setQualifiers(if (sc in tall) "w411dp-h1900dp-420dpi" else "w411dp-h914dp-420dpi")
             org.robolectric.RuntimeEnvironment.setFontScale(fs)
             val hub = sampleHub()
-            captureRoboImage("../screens_pf/a53/fs${(fs * 100).toInt()}_${sc.name}.png") { PocketFriendTheme(dark) { App(hub, sc) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/fs${(fs * 100).toInt()}_${sc.name}.png") { PocketFriendTheme(dark) { App(hub, sc) } }
             if (sc == Screen.SetAi) {
                 hub.prefs.llmProvider = "qwen"; hub.prefs.qwenKey = "test-key"
-                captureRoboImage("../screens_pf/a53/fs${(fs * 100).toInt()}_SetAi_Qwen.png") { PocketFriendTheme(dark) { App(hub, sc) } }
+                captureRoboImage("../docs/archive/screens_pf/a53/fs${(fs * 100).toInt()}_SetAi_Qwen.png") { PocketFriendTheme(dark) { App(hub, sc) } }
                 hub.prefs.llmProvider = "grok"
             }
         }
@@ -100,18 +100,18 @@ class ScreenshotTest(private val screen: Screen, private val dark: Boolean) {
             fun info(fw: String, ota: Boolean, batt: Int = 78) = BfProtocol.Info(fw = fw, batt = batt, sd = true, sdFreeMb = 28_412, rec = false,
                 paired = true, wifi = true, wifiOn = false, warm = false, state = "idle", ota = ota, usb = false)
             hub.ble.preview(BleManager.State.READY, info("2.5.3", false))
-            captureRoboImage("../screens_pf/a53/${n}_Firmware_Lama.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/${n}_Firmware_Lama.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
             hub.ble.preview(BleManager.State.READY, info("0.3.0", true))
             hub.fwUpdate.preview(F)
-            captureRoboImage("../screens_pf/a53/${n}_Firmware_Siap.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/${n}_Firmware_Siap.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
             hub.fwUpdate.preview(F.copy(image = img.copy(sha256 = "0".repeat(64))))
-            captureRoboImage("../screens_pf/a53/${n}_Firmware_BelumVerif.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/${n}_Firmware_BelumVerif.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
             hub.fwUpdate.preview(F.copy(phase = id.yanuar.bf01.svc.FwUpdate.Phase.Downloading, progress = 45, message = "BF is downloading from the phone…"))
-            captureRoboImage("../screens_pf/a53/${n}_Firmware_Mengunduh.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/${n}_Firmware_Mengunduh.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
             hub.fwUpdate.preview(F.copy(phase = id.yanuar.bf01.svc.FwUpdate.Phase.Failed, progress = 60, message = "Download interrupted. Keeping the old firmware"))
-            captureRoboImage("../screens_pf/a53/${n}_Firmware_Gagal.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/${n}_Firmware_Gagal.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
             hub.fwUpdate.preview(F.copy(phase = id.yanuar.bf01.svc.FwUpdate.Phase.Done, progress = 100, message = "BF is now v0.3.1"))
-            captureRoboImage("../screens_pf/a53/${n}_Firmware_Selesai.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/${n}_Firmware_Selesai.png") { PocketFriendTheme(dark) { App(hub, Screen.SetFirmware) } }
         }
         org.robolectric.RuntimeEnvironment.setFontScale(1f)
     }
@@ -122,11 +122,11 @@ class ScreenshotTest(private val screen: Screen, private val dark: Boolean) {
         for (fs in listOf(1.0f, 1.15f, 1.3f)) {
             org.robolectric.RuntimeEnvironment.setFontScale(fs)
             val hub = sampleHub(); hub.db.clearChat()
-            captureRoboImage("../screens_pf/a53/fs${(fs * 100).toInt()}_Ngobrol_Kosong.png") { PocketFriendTheme(dark) { App(hub, Screen.Ngobrol) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/fs${(fs * 100).toInt()}_Ngobrol_Kosong.png") { PocketFriendTheme(dark) { App(hub, Screen.Ngobrol) } }
             hub.ble.preview(BleManager.State.OFF, null)
-            captureRoboImage("../screens_pf/a53/fs${(fs * 100).toInt()}_Tugas_Menyambung.png") { PocketFriendTheme(dark) { App(hub, Screen.Tugas) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/fs${(fs * 100).toInt()}_Tugas_Menyambung.png") { PocketFriendTheme(dark) { App(hub, Screen.Tugas) } }
             hub.prefs.linkEnabled = false; hub.linked.value = false
-            captureRoboImage("../screens_pf/a53/fs${(fs * 100).toInt()}_Tugas_Off.png") { PocketFriendTheme(dark) { App(hub, Screen.Tugas) } }
+            captureRoboImage("../docs/archive/screens_pf/a53/fs${(fs * 100).toInt()}_Tugas_Off.png") { PocketFriendTheme(dark) { App(hub, Screen.Tugas) } }
         }
         org.robolectric.RuntimeEnvironment.setFontScale(1f)
     }
@@ -137,7 +137,7 @@ class ScreenshotTest(private val screen: Screen, private val dark: Boolean) {
         val hub = sampleHub()
         hub.prefs.linkEnabled = false; hub.linked.value = false
         hub.ble.preview(BleManager.State.OFF, null)
-        captureRoboImage("../screens_pf/link_off_${screen.name}.png") { PocketFriendTheme(dark) { App(hub, screen) } }
+        captureRoboImage("../docs/archive/screens_pf/link_off_${screen.name}.png") { PocketFriendTheme(dark) { App(hub, screen) } }
     }
 
     /** v0.3.1: ASK BF, Home, status sheet from the top, File & Data, Settings (A53, dark). */
@@ -145,15 +145,15 @@ class ScreenshotTest(private val screen: Screen, private val dark: Boolean) {
         if (!dark || screen != Screen.Beranda) return
         org.robolectric.RuntimeEnvironment.setQualifiers("w411dp-h914dp-420dpi")
         val hub = sampleHub()
-        captureRoboImage("../screens_pf/v031/AskBF.png") { PocketFriendTheme(dark) { App(hub, Screen.Ngobrol) } }
+        captureRoboImage("../docs/archive/screens_pf/v031/AskBF.png") { PocketFriendTheme(dark) { App(hub, Screen.Ngobrol) } }
         val empty = sampleHub(); empty.db.clearChat()
-        captureRoboImage("../screens_pf/v031/AskBF_empty.png") { PocketFriendTheme(dark) { App(empty, Screen.Ngobrol) } }
-        captureRoboImage("../screens_pf/v031/Home.png") { PocketFriendTheme(dark) { App(hub, Screen.Beranda) } }
-        captureRoboImage("../screens_pf/v031/StatusSheet.png") { PocketFriendTheme(dark) { App(hub, Screen.Beranda, sheetOpen = true) } }
-        captureRoboImage("../screens_pf/v031/FileData.png") { PocketFriendTheme(dark) { App(hub, Screen.File) } }
-        captureRoboImage("../screens_pf/v031/Settings.png") { PocketFriendTheme(dark) { App(hub, Screen.Pengaturan) } }
+        captureRoboImage("../docs/archive/screens_pf/v031/AskBF_empty.png") { PocketFriendTheme(dark) { App(empty, Screen.Ngobrol) } }
+        captureRoboImage("../docs/archive/screens_pf/v031/Home.png") { PocketFriendTheme(dark) { App(hub, Screen.Beranda) } }
+        captureRoboImage("../docs/archive/screens_pf/v031/StatusSheet.png") { PocketFriendTheme(dark) { App(hub, Screen.Beranda, sheetOpen = true) } }
+        captureRoboImage("../docs/archive/screens_pf/v031/FileData.png") { PocketFriendTheme(dark) { App(hub, Screen.File) } }
+        captureRoboImage("../docs/archive/screens_pf/v031/Settings.png") { PocketFriendTheme(dark) { App(hub, Screen.Pengaturan) } }
         val off = sampleHub(); off.prefs.linkEnabled = false; off.linked.value = false; off.ble.preview(BleManager.State.OFF, null)
-        captureRoboImage("../screens_pf/v031/StatusSheet_off.png") { PocketFriendTheme(dark) { App(off, Screen.Beranda, sheetOpen = true) } }
+        captureRoboImage("../docs/archive/screens_pf/v031/StatusSheet_off.png") { PocketFriendTheme(dark) { App(off, Screen.Beranda, sheetOpen = true) } }
     }
 
     /** v0.3.2: Recordings, Ask AI bubble, Notes with play, To-do with voice task, TODAY pill, AI name (A53, fontScale 1.0 & 1.3). */
