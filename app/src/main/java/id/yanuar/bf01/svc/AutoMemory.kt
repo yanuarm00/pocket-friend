@@ -1,6 +1,8 @@
 package id.yanuar.bf01.svc
 
+import id.yanuar.bf01.ai.ChatTemperature
 import id.yanuar.bf01.ai.chatProvider
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -14,6 +16,11 @@ import org.json.JSONObject
  */
 class AutoMemory(private val hub: Hub) {
     private var idle: Job? = null
+    /** v0.3.9: fakta yang baru saja disimpan (untuk chip "Saved to memory" + Undo). */
+    data class Saved(val ids: List<Long>, val facts: List<String>)
+    val lastSaved = MutableStateFlow<Saved?>(null)
+    fun undoLast() { lastSaved.value?.ids?.forEach { hub.db.deleteMemory(it) }; lastSaved.value = null; hub.revision.value++ }
+    fun dismissLast() { lastSaved.value = null }
     private val lock = Mutex()
 
     fun onChatActivity() {
@@ -31,22 +38,23 @@ class AutoMemory(private val hub: Hub) {
         val user = msgs.filter { it.role == "user" }
         if (msgs.isEmpty()) return@withLock
         if (user.sumOf { it.text.length } < MIN_USER_CHARS) { hub.prefs.memChatMark = msgs.last().id; return@withLock }
-        val convo = msgs.joinToString("\n") { (if (it.role == "user") "U: " else "A: ") + it.text.take(400) }.takeLast(MAX_INPUT)
+        // v0.3.9: HANYA pesan pengguna. Balasan AI tidak boleh menjadi sumber fakta (dulu AI mengarang "a wrong name").
+        val convo = user.joinToString("\n") { it.text.take(400) }.takeLast(MAX_INPUT)
         runCatching { extract(convo, "chat") }
             .onSuccess { hub.prefs.memChatMark = msgs.last().id }
             .onFailure { hub.log("Auto memory failed: ${it.message}") }
     }
 
     private suspend fun extract(input: String, source: String) = withContext(Dispatchers.IO) {
-        val reply = chatProvider(hub.prefs).chat(PROMPT, emptyList(), input)
+        val reply = withContext(ChatTemperature(0.0)) { chatProvider(hub.prefs).chat(PROMPT, emptyList(), input) }
         hub.db.addUsage(chat = 1)
         val existing = hub.db.memories().map { it.text }.toMutableList()
-        var added = 0
+        val ids = mutableListOf<Long>(); val facts = mutableListOf<String>()
         for (f in parseFacts(reply)) {
-            if (isSensitive(f) || existing.any { similar(it, f) }) continue
-            hub.db.addMemory(f, source, auto = true); existing += f; added++
+            if (isSensitive(f) || existing.any { similar(it, f) } || !grounded(f, input)) continue
+            ids += hub.db.addMemory(f, source, auto = true); facts += f; existing += f
         }
-        if (added > 0) { hub.db.capMemories(CAP); hub.revision.value++; hub.log("Auto memory: +$added from $source") }
+        if (ids.isNotEmpty()) { hub.db.capMemories(CAP); hub.revision.value++; lastSaved.value = Saved(ids, facts); hub.log("Auto memory: +${ids.size} from $source") }
     }
 
     companion object {
@@ -54,9 +62,25 @@ class AutoMemory(private val hub: Hub) {
         const val CAP = 200
         const val MAX_INPUT = 3000
         const val MIN_USER_CHARS = 20
-        val PROMPT = "Dari teks berikut, ambil maks 3 fakta TAHAN LAMA tentang pengguna (Mas Yan): preferensi, kebiasaan, rencana, orang, proyek. " +
-            "Abaikan obrolan sesaat, pertanyaan umum, dan data rahasia (kunci API, kata sandi, PIN, OTP, nomor kartu/rekening). " +
-            "Tiap fakta satu kalimat pendek bahasa Indonesia. Balas HANYA JSON: {\"facts\":[\"...\"]} atau {\"facts\":[]}."
+        val PROMPT = "Teks berikut HANYA berisi pesan yang ditulis pengguna sendiri. Ambil maks 3 fakta yang pengguna nyatakan SECARA EKSPLISIT tentang dirinya " +
+            "(preferensi, kebiasaan, rencana, proyek). Tulis sedekat mungkin dengan kata-kata pengguna; JANGAN menambah, menyimpulkan, atau menebak. " +
+            "JANGAN pernah membuat atau menambahkan nama orang yang tidak tertulis persis di teks. Abaikan pertanyaan, perintah, obrolan sesaat, " +
+            "dan data rahasia (kunci API, kata sandi, PIN, OTP, nomor kartu/rekening). Kalau ragu, jangan simpan apa pun. " +
+            "Balas HANYA JSON: {\"facts\":[\"...\"]} atau {\"facts\":[]}."
+
+        /**
+         * v0.3.9: fakta harus berpijak pada teks pengguna. Setiap kata berhuruf kapital (nama) wajib muncul di teks,
+         * dan ≥80% kata inti fakta harus ada di teks. Mencegah AI mengarang nama/fakta.
+         */
+        fun grounded(fact: String, userText: String): Boolean {
+            val text = userText.lowercase()
+            val names = Regex("\\b[A-Z][A-Za-z0-9]+").findAll(fact).filter { it.range.first > 0 }.map { it.value }
+            if (names.any { it.lowercase() !in text }) return false
+            val core = tokens(fact); if (core.isEmpty()) return false
+            val src = tokens(userText)
+            val hit = core.count { c -> c in src || text.contains(c) }
+            return hit >= kotlin.math.ceil(core.size * 0.8)
+        }
 
         fun parseFacts(s: String): List<String> {
             val arr = runCatching {

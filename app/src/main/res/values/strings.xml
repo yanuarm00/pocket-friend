@@ -4,7 +4,7 @@
 
     <!-- Navigation -->
     <string name="nav_home">Home</string>
-    <string name="nav_ask">Ask AI</string>
+    <string name="nav_ask">Ask BF</string>
     <string name="nav_todo">To-do</string>
     <string name="nav_notes">Notes</string>
     <string name="nav_settings">Settings</string>
@@ -13,7 +13,10 @@
     <!-- Screen titles -->
     <string name="t_pairing">Pairing</string>
     <string name="t_tasks">To-do</string>
-    <string name="t_card">Name card</string>
+    <string name="t_aichats">AI chats</string>
+    <string name="t_ai_usage">AI usage</string>
+    <string name="t_usage_page">Usage</string>
+    <string name="t_card">Hi! profiles</string>
     <string name="t_menu">BF menu</string>
     <string name="t_file">Recordings</string>
     <string name="t_ai">AI provider</string>
@@ -34,6 +37,8 @@
     <string name="status_disconnected">Disconnected</string>
     <string name="status_on_note">BF is ready to chat.</string>
     <string name="status_connecting_note">Waiting for BF. Press PWR on BF if it is asleep.</string>
+    <string name="status_bf_off">BF disconnected</string>
+    <string name="status_bf_off_note">Turned off on BF (hold the screen 1.5 s). Hold again on BF to reconnect.</string>
     <string name="status_off_note">BF stays disconnected until you tap Reconnect.</string>
     <string name="battery">Battery</string>
     <string name="firmware_x">Firmware %1$s</string>
@@ -45,7 +50,7 @@
     <string name="home_reload">Reload</string>
 
     <!-- Ask BF -->
-    <string name="ask_hello">Hi Mas Yan! 👋</string>
+    <string name="ask_hello">Hi Alex! 👋</string>
     <string name="ask_intro">I\'m %1$s. Ask me anything: your schedule, ideas, or just how your day went. Where do we start?</string>
     <string name="ask_s1">What\'s on my schedule today?</string>
     <string name="ask_s2">Give me content ideas for this week</string>
@@ -94,4 +99,9 @@
     <string name="cancel">Cancel</string>
     <string name="expand">Expand</string>
     <string name="collapse">Collapse</string>
+    <string name="t_search">Search</string>
+    <string name="t_onboard">Welcome</string>
+    <string name="t_privacy">Privacy &amp; data</string>
+    <string name="t_conn_help">Connection help</string>
+    <string name="t_theme">Theme</string>
 </resources>

@@ -27,7 +27,8 @@ enum class Screen(@androidx.annotation.StringRes val title: Int) {
     Beranda(R.string.nav_home), Pairing(R.string.t_pairing), Catatan(R.string.nav_notes), Tugas(R.string.t_tasks), Ngobrol(R.string.nav_ask),
     Kartu(R.string.t_card), Menu(R.string.t_menu), File(R.string.t_file), Pengaturan(R.string.nav_settings),
     SetAi(R.string.t_ai), SetSuara(R.string.t_voice), SetJaringan(R.string.t_network), SetIzin(R.string.t_perms),
-    SetPerangkat(R.string.t_device), SetPemakaian(R.string.t_usage), SetFirmware(R.string.t_firmware)
+    SetPerangkat(R.string.t_device), SetPemakaian(R.string.t_usage), SetFirmware(R.string.t_firmware), AiChats(R.string.t_aichats), AiUsage(R.string.t_ai_usage), Usage(R.string.t_usage_page),
+    Search(R.string.t_search), Onboard(R.string.t_onboard), Privacy(R.string.t_privacy), ConnHelp(R.string.t_conn_help), ThemeBoard(R.string.t_theme)
 }
 
 /** Tumpukan layar sederhana untuk tombol/gesture kembali.
@@ -67,7 +68,7 @@ class MainActivity : ComponentActivity() {
     private val perms = buildList {
         add(Manifest.permission.ACCESS_FINE_LOCATION); add(Manifest.permission.READ_CALENDAR)
         if (Build.VERSION.SDK_INT >= 31) { add(Manifest.permission.BLUETOOTH_SCAN); add(Manifest.permission.BLUETOOTH_CONNECT) }
-        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= 33) { add(Manifest.permission.POST_NOTIFICATIONS); add(Manifest.permission.NEARBY_WIFI_DEVICES) }
     }.toTypedArray()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,7 +80,21 @@ class MainActivity : ComponentActivity() {
         launcher.launch(perms)
         val hub = Hub.get(this)
         enableEdgeToEdge()
-        setContent { PocketFriendTheme(dark = true) { App(hub) } }
+        id.yanuar.bf01.svc.AppUpdate.autoCheck(this)
+        id.yanuar.bf01.svc.UpdateCheckWorker.schedule(this)   // about once a day, in the background
+        handleUpdateIntent(intent)
+        AppTheme.init(hub.prefs)
+        setContent { PocketFriendTheme(AppTheme.isDark()) { App(hub) } }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); setIntent(intent); handleUpdateIntent(intent) }
+
+    /** Tapped the "New version available" notification: refresh the existing Update card (it shows on Home). */
+    private fun handleUpdateIntent(i: android.content.Intent?) {
+        if (i?.getBooleanExtra(id.yanuar.bf01.svc.UpdateCheckWorker.EXTRA_OPEN_UPDATE, false) == true) {
+            i.removeExtra(id.yanuar.bf01.svc.UpdateCheckWorker.EXTRA_OPEN_UPDATE)
+            id.yanuar.bf01.svc.AppUpdate.check(this)
+        }
     }
 }
 
@@ -90,7 +105,8 @@ private val tabs = listOf(Screen.Beranda to R.string.nav_home, Screen.Ngobrol to
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
-    val nav = androidx.compose.runtime.saveable.rememberSaveable(saver = NavStack.Saver) { NavStack(initial ?: if (hub.prefs.deviceAddress == null) Screen.Pairing else Screen.Beranda) }
+    val nav = androidx.compose.runtime.saveable.rememberSaveable(saver = NavStack.Saver) { NavStack(initial ?: when { !hub.prefs.onboarded -> Screen.Onboard; hub.prefs.deviceAddress == null -> Screen.Pairing; else -> Screen.Beranda }) }
+    hub.openScreen = { nav.open(it) }
     val screen = nav.current
     // Tiap layar punya penyimpanan state sendiri (scroll, isian yang belum disimpan, bagian yang dibuka).
     val holder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
@@ -102,36 +118,28 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
     val status = rememberBfStatus(hub)
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        topBar = {
+        topBar = { if (screen !in setOf(Screen.Beranda, Screen.Catatan, Screen.Tugas, Screen.Ngobrol, Screen.AiChats, Screen.Search, Screen.Onboard, Screen.Kartu, Screen.SetFirmware))
             TopAppBar(title = {
-                if (isTab) DotText(stringResource(screen.title).uppercase(), Dot.L, 1.2f)
+                if (isTab) Column {  // v0.4.1: v5.13 header (big title + one-line subtitle) instead of the old dot-matrix bar
+                    if (screen != Screen.Pengaturan) Text(stringResource(screen.title), style = MaterialTheme.typography.headlineMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
+                    val sub = when (screen) { Screen.Catatan -> "Everything BF heard."; Screen.Tugas -> "Plan it, BF reminds you."; Screen.Ngobrol -> "Ask anything. BF checks your notes first."; else -> "" }
+                    if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 else Text(stringResource(screen.title), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }, navigationIcon = { if (!isTab) IconButton({ nav.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
                 actions = { StatusPill(status, compact = !isTab) { sheet = true }; Spacer(Modifier.width(12.dp)) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
         },
-        bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-                tabs.forEach { (s, label) ->
-                    val sel = s == screen || (!isTab && s == Screen.Pengaturan)
-                    NavigationBarItem(sel, { nav.tab(s) }, label = { Text(stringResource(label), style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Clip) }, icon = {
-                        when (s) {
-                            Screen.Ngobrol -> BfNavIcon()
-                            else -> Icon(when (s) { Screen.Beranda -> Icons.Default.Home; Screen.Tugas -> Icons.Default.CheckCircle
-                                Screen.Catatan -> Icons.Default.Edit; else -> Icons.Default.Settings }, null)
-                        } })
-                }
-            }
-        }) { pad ->
+        bottomBar = { PopNavBar(screen, isTab) { nav.tab(it) } },
+) { pad ->
         Box(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 14.dp)) {
             holder.SaveableStateProvider(screen.name) { when (screen) {
-                Screen.Beranda -> BerandaScreen(hub)
+                Screen.Beranda -> BerandaScreen(hub, go = { if (tabs.any { t -> t.first == it }) nav.tab(it) else nav.open(it) }, onStatus = { sheet = true })
                 Screen.Pairing -> PairingScreen(hub) { if (!nav.back()) nav.tab(Screen.Beranda) }
                 Screen.Catatan -> CatatanScreen(hub)
                 Screen.Tugas -> TugasScreen(hub)
                 Screen.Ngobrol -> NgobrolScreen(hub)
-                Screen.Kartu -> KartuScreen(hub)
+                Screen.Kartu -> ProfilesScreen(hub)
                 Screen.Menu -> MenuScreen(hub)
                 Screen.File -> FileScreen(hub)
                 Screen.Pengaturan -> PengaturanScreen(hub) { nav.open(it) }
@@ -141,7 +149,15 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
                 Screen.SetIzin -> SetIzinScreen(hub)
                 Screen.SetPerangkat -> SetPerangkatScreen(hub) { nav.open(it) }
                 Screen.SetFirmware -> FirmwareScreen(hub)
+                Screen.Search -> SearchScreen(hub) { if (!nav.back()) nav.tab(Screen.Catatan) }
+                Screen.Onboard -> OnboardScreen(hub) { nav.tab(Screen.Beranda) }
+                Screen.Privacy -> PrivacyScreen(hub)
+                Screen.ConnHelp -> ConnHelpScreen(hub)
+                Screen.ThemeBoard -> ThemeBoardScreen(hub)
                 Screen.SetPemakaian -> SetPemakaianScreen(hub)
+                Screen.AiChats -> AiChatsScreen(hub)
+                Screen.AiUsage -> AiUsageScreen(hub)
+                Screen.Usage -> UsageScreen(hub)
             } }
         }
     }

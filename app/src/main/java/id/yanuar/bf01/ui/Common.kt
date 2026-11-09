@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -31,12 +32,15 @@ import id.yanuar.bf01.svc.Hub
 
 /** Status sambungan BF untuk pil di header. */
 enum class BfStatus(@androidx.annotation.StringRes val label: Int, val mood: BfMood, val filled: Boolean) {
-    On(R.string.pill_on, BfMood.Senyum, true), Menyambung(R.string.pill_connecting, BfMood.Datar, false), Off(R.string.pill_off, BfMood.Sedih, false)
+    On(R.string.pill_on, BfMood.Senyum, true), Menyambung(R.string.pill_connecting, BfMood.Datar, false), Off(R.string.pill_off, BfMood.Sedih, false),
+    /** v0.3.9.5: BF memutus sambungan sendiri — bukan error, tidak perlu Reconnect. */
+    DiputusBf(R.string.pill_off, BfMood.Datar, false)
 }
 
 @Composable fun rememberBfStatus(hub: Hub): BfStatus {
     val linked by hub.linked.collectAsState(); val st by hub.ble.state.collectAsState()
-    return when { !linked -> BfStatus.Off; st == BleManager.State.READY -> BfStatus.On; else -> BfStatus.Menyambung }
+    val off by hub.bfTurnedOff.collectAsState()
+    return when { !linked -> BfStatus.Off; st == BleManager.State.READY -> BfStatus.On; off -> BfStatus.DiputusBf; else -> BfStatus.Menyambung }
 }
 
 /** Pil status mengambang di header: ON = blok solid + BF senyum, OFF = garis luar + BF sedih, menyambung = garis luar berdenyut. */
@@ -83,11 +87,18 @@ enum class BfStatus(@androidx.annotation.StringRes val label: Int, val mood: BfM
                     BfFace(52.dp, status.mood, status.filled, color = cs.onSurface)
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
-                        DotText(stringResource(when (status) { BfStatus.On -> R.string.status_connected; BfStatus.Menyambung -> R.string.status_connecting; BfStatus.Off -> R.string.status_disconnected }).uppercase(), Dot.S, 1.1f)
+                        DotText(stringResource(when (status) { BfStatus.On -> R.string.status_connected; BfStatus.Menyambung -> R.string.status_connecting; BfStatus.Off -> R.string.status_disconnected; BfStatus.DiputusBf -> R.string.status_bf_off }).uppercase(), Dot.S, 1.1f)
                         Spacer(Modifier.height(6.dp))
                         Text(stringResource(when (status) { BfStatus.On -> R.string.status_on_note; BfStatus.Menyambung -> R.string.status_connecting_note
-                            BfStatus.Off -> R.string.status_off_note }), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                            BfStatus.Off -> R.string.status_off_note; BfStatus.DiputusBf -> R.string.status_bf_off_note }), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                     }
+                }
+                DeviceNameRow(hub)
+                // v0.4.6: accent-tinted connection chip (device-sheet variant)
+                Surface(shape = CircleShape, color = if (status == BfStatus.On) AppTheme.accentColor() else cs.surfaceVariant,
+                    contentColor = if (status == BfStatus.On) androidx.compose.ui.graphics.Color.White else cs.onSurface) {
+                    Text(if (status == BfStatus.On) "Connected" else "Offline",
+                        Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                 }
                 val b = info?.batt?.takeIf { it >= 0 && status == BfStatus.On }
                 LaunchedEffect(b) { b?.let { hub.prefs.lastBatt = it } }
@@ -99,6 +110,8 @@ enum class BfStatus(@androidx.annotation.StringRes val label: Int, val mood: BfM
                 }
                 info?.takeIf { status == BfStatus.On }?.let { Text(stringResource(R.string.firmware_x, it.fw), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
                 // Stacked full-width buttons: never wrap or truncate, even with large font sizes.
+                val fails by hub.reconnectFails.collectAsState()
+                if (fails >= 2 && status != BfStatus.On) HelpNote(CONNECT_HELP)
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     ActionButton(stringResource(R.string.reconnect), Modifier.fillMaxWidth(), primary = status != BfStatus.On, icon = Sym.Refresh) { hub.reconnect(); dismiss() }
                     if (linked) OutlinedButton({ hub.disconnectAll(); dismiss() }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
@@ -117,11 +130,11 @@ enum class BfStatus(@androidx.annotation.StringRes val label: Int, val mood: BfM
     var open by rememberSaveable { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     Row(modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).then(if (detail != null) Modifier.clickable { open = true } else Modifier).padding(vertical = 2.dp),
-        verticalAlignment = Alignment.Top) {
-        Icon(Sym.Info, null, Modifier.padding(top = 1.dp).size(16.dp), tint = cs.onSurfaceVariant)
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(Sym.Info, null, Modifier.size(16.dp), tint = cs.onSurfaceVariant)
         Spacer(Modifier.width(8.dp))
         Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        if (detail != null) { Spacer(Modifier.width(8.dp)); Text("Details", style = MaterialTheme.typography.labelMedium, color = cs.onSurface) }
+        if (detail != null) { Spacer(Modifier.width(12.dp)); Text("Details", style = MaterialTheme.typography.labelMedium, color = cs.primary, maxLines = 1, softWrap = false) }
     }
     if (open && detail != null) InfoSheet(text, detail) { open = false }
 }

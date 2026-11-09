@@ -1,4 +1,6 @@
 package id.yanuar.bf01.ui
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
 
 import androidx.compose.foundation.lazy.items
 import android.annotation.SuppressLint
@@ -18,6 +20,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import id.yanuar.bf01.ai.UsageReports
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.*
@@ -60,65 +63,6 @@ private val fmtClock = SimpleDateFormat("HH.mm", Locale.US)
 private val fmtDate = SimpleDateFormat("EEE, dd/MM/yy", Locale.US)
 private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable fun BerandaScreen(hub: Hub) {
-    val st by hub.ble.state.collectAsState(); val info by hub.ble.info.collectAsState(); val log by hub.log.collectAsState()
-    val scope = rememberCoroutineScope(); val ctx = LocalContext.current; val rev by hub.revision.collectAsState()
-    // Baca DB & kalender saat komposisi pertama (belum ada di layar saat frame pertama = stutter).
-    val a = rememberLoaded(hub, "beranda", rev) { id.yanuar.bf01.svc.CalendarSource.todayLines(ctx) to hub.db.tasks().filter { !it.done } }
-    val agenda = a?.first; val tasks = a?.second
-    val today = (agenda ?: emptyList()) + (tasks ?: emptyList()).map { "• ${it.title}" }
-    val now = remember { Date() }
-
-    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        BubbleCard(Modifier.fillMaxWidth(), tail = 22.dp) {
-            DotText(fmtClock.format(now), Dot.XL, 2.6f)
-            Spacer(Modifier.height(16.dp))
-            DotPill("TODAY", head = false)  // tanpa kepala tak terlihat: teks benar-benar di tengah
-            Spacer(Modifier.height(12.dp))
-            if (today.isEmpty()) Text("Nothing today. Take it easy.", style = MaterialTheme.typography.bodyLarge)
-            today.take(4).forEach { Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 3.dp)) }
-            if (today.size > 4) Text("+${today.size - 4} more", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                DotText(fmtDate.format(now), Dot.S, 1.05f, modifier = Modifier.weight(1f, false))
-                Spacer(Modifier.weight(1f)); BatteryDots(info?.batt?.takeIf { it >= 0 })
-            }
-        }
-        val ready = st == BleManager.State.READY
-        val linked by hub.linked.collectAsState()
-        Section("Device") {
-            val batt = rememberBattery(hub, ready)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val bs = rememberBfStatus(hub); BfFace(48.dp, bs.mood, bs.filled, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    DotText(linkLabel(linked, st), Dot.S, 1.1f)
-                    Text(batt, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                }
-            }
-            HelpNote(if (!linked) "BF stays disconnected until you tap Connect."
-                else if (ready) "BF is ready to chat." else "Waiting for BF. Press PWR on BF if it is asleep.")
-            info?.let { i -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip({}, { Text("FW ${i.fw}") })
-                AssistChip({}, { Text(if (i.sd) "Memory card ${"%.1f".format(i.sdFreeMb / 1024f)} GB free" else "No memory card") })
-                AssistChip({}, { Text(if (i.wifiOn) "Wi-Fi on" else "Wi-Fi off") })
-            } }
-            if (linked) HelpNote(if (hub.server.clients > 0) "Phone server: BF is chatting" else "Phone server ready on port 8000")
-            LinkToggle(hub, linked)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ActionButton(stringResource(R.string.home_sync), Modifier.weight(1f), enabled = ready, icon = Sym.CloudSync) { scope.launch { hub.syncAll() } }
-                ActionButton(stringResource(R.string.home_reload), Modifier.weight(1f), enabled = linked, icon = Sym.Refresh) { scope.launch { hub.ble.refreshInfo() } }
-            }
-            if (linked && !ready) HelpNote("Sync is available once BF is connected.")
-        }
-        if (hub.findPhone.ringing) Button({ hub.findPhone.stop() }, Modifier.fillMaxWidth()) { Text("Stop phone ringing") }
-        Section("Log") { log.takeLast(5).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-        VersionFooter(small = true)
-    }
-}
 
 @SuppressLint("MissingPermission")
 @Composable fun PairingScreen(hub: Hub, done: () -> Unit) {
@@ -127,7 +71,7 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
         @Suppress("DEPRECATION")
         val sr: ScanResult? = r.data?.getParcelableExtra(CompanionDeviceManager.EXTRA_DEVICE)
         val dev = sr?.device ?: return@rememberLauncherForActivityResult
-        hub.prefs.deviceAddress = dev.address; hub.prefs.deviceName = sr.scanRecord?.deviceName ?: ""
+        hub.prefs.deviceAddress = dev.address; if (hub.prefs.deviceName.isBlank()) hub.prefs.deviceName = sr.scanRecord?.deviceName ?: ""
         if (Build.VERSION.SDK_INT >= 31) runCatching { ctx.getSystemService(CompanionDeviceManager::class.java).startObservingDevicePresence(dev.address) }
         PairingReceiver.pendingCode = runCatching { BfProtocol.passkeyString(code) }.getOrNull()
         hub.ble.bond(dev.address)
@@ -158,39 +102,43 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable fun CatatanScreen(hub: Hub) {
     val rev by hub.revision.collectAsState(); val notes = rememberLoaded(hub, "notes", rev) { hub.db.notes() }
     var q by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     // Filter hanya dihitung saat input/kumpulan data berubah, bukan tiap ketikan karakter lain direkomposisi.
-    val shown = remember(notes, q) { (notes ?: emptyList()).filter { it.type != "TASK" }.filter { q.isBlank() || (it.transcript + it.summary + it.tags + it.file).contains(q, true) } }
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), singleLine = true, shape = MaterialTheme.shapes.extraLarge,
-            leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null) }, placeholder = { Text("Search notes") })
-        HelpNote("${shown.size} notes · voice notes from BF show up here.", "Recordings saved as NOTE land here with a transcript and short summary. TASK recordings go to To-do instead. The audio stays on BF too.")
-        if (shown.isEmpty()) Text("No notes yet.")
-        androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(shown, key = { it.id }) { n ->
-                BubbleCard(Modifier.fillMaxWidth(), tail = 12.dp) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        DotText(fmtNote.format(Date(n.created)), Dot.S, 0.95f)
-                        Spacer(Modifier.weight(1f)); Text(n.file, style = MaterialTheme.typography.labelSmall)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            if (n.summary.isNotBlank()) Text(n.summary, style = MaterialTheme.typography.titleMedium)
-                        }
-                        if (n.localPath.isNotEmpty()) PlayButton(n.localPath)
-                    }
-                    Text(n.transcript.ifBlank { if (n.localPath.isEmpty()) "(audio still on BF, syncs soon)" else "(transcribing…)" }, style = MaterialTheme.typography.bodyMedium, maxLines = 3,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                    if (n.tags.isNotBlank()) { Spacer(Modifier.height(8.dp)); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        n.tags.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { t ->
-                            DotPill(t, head = false) } } }
-                }
-            }
-        }
+    val shown = remember(notes, q) { (notes ?: emptyList()).filter { it.type == "NOTE" }.filter { q.isBlank() || (it.transcript + it.summary + it.tags + it.file).contains(q, true) } }
+    // v0.3.9.8.9: tap a card to read the whole transcript (cards stay at 3 lines)
+    var openFile by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val openNote = openFile?.let { f -> notes?.firstOrNull { it.file == f } }
+    if (openNote != null) {
+        androidx.activity.compose.BackHandler { openFile = null }
+        NoteDetail(hub, openNote) { openFile = null }; return
     }
+    val st by hub.recordings.status.collectAsState(); var how by remember { mutableStateOf(false) }
+    var filter by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var player by remember { mutableStateOf<android.media.MediaPlayer?>(null) }; var playing by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(Unit) { onDispose { player?.release() } }
+    val busy = st.phase == id.yanuar.bf01.svc.RecordingSync.Phase.Downloading || st.phase == id.yanuar.bf01.svc.RecordingSync.Phase.Transcribing || st.phase == id.yanuar.bf01.svc.RecordingSync.Phase.Connecting
+    val dev = hub.prefs.deviceName.ifBlank { "BF" }; val seen = remember { hub.prefs.lastRecSync }
+    val rows = shown.filter { n -> when (filter) { 1 -> n.localPath.isNotEmpty(); 2 -> n.localPath.isEmpty(); 3 -> n.tags.contains("idea", true); else -> true } }.map { n ->
+        val tag = n.tags.split(",").map { it.trim() }.firstOrNull { it.isNotEmpty() }
+        NoteRowUi(n.file, n.summary.ifBlank { n.transcript.take(40).ifBlank { "Voice note" } },
+            if (n.transcript.isBlank() && n.localPath.isEmpty()) "Still on $dev · syncs soon" else fmtClock.format(Date(n.created)) + (tag?.let { " · #$it" } ?: ""),
+            dayLabel(n.created), isNew = !n.processed || n.created > seen, transcribing = n.transcript.isBlank() && n.localPath.isNotEmpty(), playable = n.localPath.isNotEmpty())
+    }
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        NotesListContent(rows, q, { q = it }, filter, { filter = it }, if (busy) st.message.ifBlank { "Syncing from $dev…" } else null, st.done, st.total, playing,
+            onOpen = { openFile = it }, onPlay = { f -> val n = notes?.firstOrNull { it.file == f } ?: return@NotesListContent
+                player?.release(); player = null
+                if (playing == f) playing = null else { playing = f
+                    player = runCatching { android.media.MediaPlayer().apply { setDataSource(n.localPath); setOnCompletionListener { it.release(); player = null; playing = null }; prepare(); start() } }.getOrNull()
+                    if (player == null) playing = null } },
+            onShowHow = { how = true }, syncLine = { SyncStatusLine(hub) }, onOpenSearch = { hub.openScreen?.invoke(Screen.Search) })
+        Spacer(Modifier.height(24.dp))
+    }
+    if (how) AlertDialog({ how = false }, title = { Text("Save a note") }, text = { Text("Hold the top button on $dev, speak, then let go and pick NOTE. It shows up here with a transcript once $dev syncs.") },
+        confirmButton = { TextButton({ how = false }) { Text("Got it") } })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -209,80 +157,89 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
     var sentAt by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     val snack = remember { SnackbarHostState() }
     val cs = MaterialTheme.colorScheme
-    fun add() { if (t.isNotBlank()) { hub.db.addTask(t.trim()); t = ""; adding = false; r++ } }
+    // v0.4.0: to-dos sync to the device the moment they are saved; offline they wait for it.
+    val bleSt by hub.ble.state.collectAsState(); val devName = hub.prefs.deviceName.ifBlank { "BF" }
+    var lastPush by remember { mutableLongStateOf(0L) }
+    fun pushNow() { if (hub.ble.state.value == BleManager.State.READY) hub.scope.launch { runCatching { if (hub.pushTasks(force = true)) { hub.pushAlarms(); lastPush = System.currentTimeMillis() } } } }
+    fun add() { if (t.isNotBlank()) { hub.db.addTask(t.trim()); t = ""; adding = false; r++; hub.revision.value++; pushNow() } }
+    val jobs = remember { mutableMapOf<Long, kotlinx.coroutines.Job>() }
+    fun del(id: Long) { pending.add(id); jobs[id] = scope.launch { kotlinx.coroutines.delay(5000); hub.db.deleteTask(id); pending.remove(id); jobs.remove(id); r++; hub.revision.value++
+        hub.scope.launch { runCatching { hub.pushTasks(force = true) } } } }
+    fun undo(id: Long) { jobs.remove(id)?.cancel(); pending.remove(id) }
+    var openId by androidx.compose.runtime.saveable.rememberSaveable { mutableLongStateOf(0L) }
+    var editing by remember { mutableStateOf(false) }
+    val all = d?.first
+    val online = bleSt == BleManager.State.READY
+    val openTask = all?.firstOrNull { it.id == openId }
+    if (openTask != null) {
+        androidx.activity.compose.BackHandler { openId = 0L }
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            TodoDetailContent(openTask.title, if (openTask.detail.isNotBlank()) "From voice note" else "Added on phone", openTask.detail,
+                if (openTask.due > 0) hub.whenLabel(openTask.due) else "No time set", "Doesn't repeat",
+                if (openTask.due > 0) "At time · $devName says it" else "No reminder", devName,
+                if (online && lastPush > 0) "Synced ${agoLabel(lastPush)}" else if (online) "Synced" else "Waiting for $devName", "", openTask.done,
+                back = { openId = 0L }, onEdit = { t = openTask.title; editing = true },
+                onToggle = { hub.db.setDone(openTask.id, !openTask.done); r++; hub.revision.value++; pushNow() },
+                onDelete = { del(openTask.id); openId = 0L })
+        }
+        if (editing) {
+            var showOn by remember { mutableStateOf(true) }
+            var repeat by remember { mutableStateOf(hub.prefs.taskRepeat(openTask.id)) }
+            var days by remember { mutableStateOf(setOf(0,1,2,3,4)) }
+            var sheet by remember { mutableStateOf(false) }
+            val dueLab = if (openTask.due > 0) java.text.SimpleDateFormat("EEE, d MMM", java.util.Locale.US).format(java.util.Date(openTask.due)) else "Not set"
+            val timeLab = if (openTask.due > 0) java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(openTask.due)) else "—"
+            val repLab = when (repeat) { "daily" -> "Every day"; "weekdays" -> "Weekdays"; "custom" -> "On these days"; "monthly" -> "Every month"; else -> "Never" }
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                TodoEditContent(t.ifBlank { openTask.title }, { t = it }, dueLab, timeLab, if (openTask.due > 0) "At time" else "None", repLab, showOn, devName,
+                    onDue = {}, onTime = {}, onRemind = {}, onRepeat = { sheet = true }, onShow = { showOn = it },
+                    onSave = {
+                        val title = t.trim().ifBlank { openTask.title }
+                        hub.db.renameTask(openTask.id, title); hub.prefs.setTaskRepeat(openTask.id, repeat)
+                        r++; hub.revision.value++; pushNow(); t = ""; editing = false
+                    },
+                    onDelete = { del(openTask.id); openId = 0L; editing = false },
+                    onClose = { t = ""; editing = false })
+            }
+            if (sheet) androidx.compose.ui.window.Dialog({ sheet = false }) {
+                TodoRepeatSheet(repeat, days, { repeat = it }, { days = it }, onSave = { sheet = false }, onDismiss = { sheet = false })
+            }
+            return
+        }
+        return
+    }
+    val now = System.currentTimeMillis(); val endDay = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, 23); set(java.util.Calendar.MINUTE, 59) }.timeInMillis
+    val rows = (all ?: emptyList()).map { k -> TodoRowUi(k.id, k.title, if (k.done) "Done" else if (k.due > 0) hub.whenLabel(k.due) else "", k.done,
+        synced = online && lastPush > 0, deleting = k.id in pending) }
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            // Agenda hari ini: baris biasa (bukan pil yang terlihat seperti tombol) + chip izin yang memang tombol.
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            TodoListContent(rows, today = (all ?: emptyList()).count { !it.done && (it.due == 0L || it.due <= endDay) },
+                reminders = (all ?: emptyList()).count { !it.done && it.due > now }, done = (all ?: emptyList()).count { it.done },
+                onAdd = { adding = true }, onToggle = { id -> all?.firstOrNull { it.id == id }?.let { hub.db.setDone(id, !it.done); r++; hub.revision.value++; pushNow() } },
+                onOpen = { openId = it }, onUndo = { undo(it) }, devName = devName) {
+                if (adding) OutlinedTextField(t, { t = it }, Modifier.fillMaxWidth(), label = { Text("New to-do") }, singleLine = true, shape = MaterialTheme.shapes.large,
+                    keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
+                    trailingIcon = { IconButton({ add() }, enabled = t.isNotBlank()) { Icon(Sym.Add, "Add") } })
+            }
+            // Today's calendar + manual send, kept from v0.4.1.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                androidx.compose.foundation.layout.FlowRow(verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Sym.CalendarToday, null, tint = cs.onSurfaceVariant); Spacer(Modifier.width(10.dp))
-                    Text(if (agenda.isNullOrEmpty()) "Today · empty" else "Today · ${agenda.size} events", style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                    Spacer(Modifier.width(12.dp)) }
-                    if (!calOk) AssistChip({ calLauncher.launch(android.Manifest.permission.READ_CALENDAR) }, { Text("Allow calendar") },
-                        leadingIcon = { Icon(Sym.Lock, null, Modifier.size(18.dp)) })
+                    Text(if (agenda.isNullOrEmpty()) "Calendar today · empty" else "Calendar today · ${agenda.size} events", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    if (!calOk) AssistChip({ calLauncher.launch(android.Manifest.permission.READ_CALENDAR) }, { Text("Allow calendar") }, leadingIcon = { Icon(Sym.Lock, null, Modifier.size(18.dp)) })
                 }
                 agenda?.forEach { a -> Row(Modifier.padding(start = 34.dp)) {
                     Text(a.substringBefore(' '), style = MaterialTheme.typography.titleSmall, modifier = Modifier.width(56.dp))
                     Text(a.substringAfter(' '), style = MaterialTheme.typography.bodyLarge) } }
-            }
-            if (adding) OutlinedTextField(t, { t = it }, Modifier.fillMaxWidth(), label = { Text("New task") }, singleLine = true, shape = MaterialTheme.shapes.large,
-                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
-                trailingIcon = { IconButton({ add() }, enabled = t.isNotBlank()) { Icon(Sym.Add, "Add") } })
-            Card(Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(cs.surfaceContainerHigh)) {
-                Row(Modifier.padding(start = 22.dp, end = 6.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Task", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Text("${tasks?.count { it.done } ?: 0}/${tasks?.size ?: 0}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
-                    InfoButton("Task tips", "• Swipe a task left to delete it. An Undo button appears right after.\n" +
-                        "• You can also add one by voice: hold the button on BF, speak, then choose TASK.\n" +
-                        "• Send to BF sends your events, tasks and reminders for the next 48 hours, because the phone can't reach BF while it sleeps.")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton({ scope.launch { hub.syncTime(); hub.ble.write(BfProtocol.NOTIFY, BfProtocol.agenda(agenda ?: emptyList())); hub.pushTasks(); hub.pushAlarms(); sentAt = fmtClock.format(Date()) } }) {
+                        Icon(Sym.Sync, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Send to $devName now") }
+                    Text(if (sentAt.isNotEmpty()) "last $sentAt" else if (online) "On $devName" else "Waiting for $devName", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                 }
-                if (tasks?.isEmpty() == true) Text("No tasks yet. Tap + Task to add one.", style = MaterialTheme.typography.bodyMedium,
-                    color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp))
-                tasks?.forEach { k -> key(k.id) {
-                    val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
-                        if (v == SwipeToDismissBoxValue.EndToStart) {
-                            pending.add(k.id)
-                            scope.launch {
-                                var undo = false
-                                try { undo = snack.showSnackbar("Task deleted", "Undo", duration = SnackbarDuration.Short) == SnackbarResult.ActionPerformed }
-                                finally { if (!undo) hub.db.deleteTask(k.id); pending.remove(k.id); r++ }
-                            }
-                            true
-                        } else false })
-                    SwipeToDismissBox(state, enableDismissFromStartToEnd = false, backgroundContent = {
-                        Box(Modifier.fillMaxSize().background(cs.errorContainer).padding(horizontal = 24.dp), contentAlignment = Alignment.CenterEnd) {
-                            Icon(Sym.Delete, "Delete", tint = cs.onErrorContainer) } }) {
-                        Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHigh).clickable { hub.db.setDone(k.id, !k.done); r++ }
-                            .padding(start = 10.dp, end = 22.dp, top = 4.dp, bottom = 4.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(k.done, { hub.db.setDone(k.id, it); r++ })
-                            Spacer(Modifier.width(6.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(k.title, style = MaterialTheme.typography.bodyLarge,
-                                    textDecoration = if (k.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
-                                    color = if (k.done) cs.onSurfaceVariant else cs.onSurface)
-                                if (k.detail.isNotBlank()) Text(k.detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                                    maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                            }
-                        }
-                    }
-                } }
-                Spacer(Modifier.height(12.dp))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ActionButton("Send to BF", Modifier, icon = Sym.Sync) {
-                    scope.launch { hub.syncTime(); hub.ble.write(BfProtocol.NOTIFY, BfProtocol.agenda(agenda ?: emptyList())); hub.pushTasks(); hub.pushAlarms()
-                        sentAt = fmtClock.format(Date()) } }
-                if (sentAt.isNotEmpty()) { Spacer(Modifier.width(12.dp))
-                    Text("last $sentAt", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant) }
             }
         }
-        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp))
-        ExtendedFloatingActionButton(text = { Text("Task") }, icon = { Icon(Sym.Add, null) },
-            onClick = { adding = true }, modifier = Modifier.align(Alignment.BottomEnd))
+        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter))
     }
 }
 
@@ -312,8 +269,8 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
     val chat = d?.first; val mems = d?.second
     var persona by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(hub.prefs.persona) }; var mem by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var msg by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }; var busy by remember { mutableStateOf(false) }; var more by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    var confirmClear by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope(); val cs = MaterialTheme.colorScheme; val ai = hub.prefs.aiName
+    var confirmClear by remember { mutableStateOf(false) }; var confirmMem by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope(); val cs = MaterialTheme.colorScheme; val ai = hub.prefs.aiName; val ctxChat = LocalContext.current
     // pending = the message waiting for a reply (or that failed); err = plain-English reason, shown with Retry.
     var pending by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var err by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
@@ -327,36 +284,18 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
             finally { busy = false; r++ } } } }
     val empty = chat?.isEmpty() == true && !busy && pending.isEmpty()
     Column(Modifier.fillMaxSize()) {
+        var memOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
+        AskHeader(ai, persona.lineSequence().firstOrNull()?.take(14)?.ifBlank { null } ?: "Calm buddy", { hub.openScreen?.invoke(Screen.AiChats) }) { more = !more }
+        Spacer(Modifier.height(10.dp))
+        RemembersCard(ai, mems?.map { it.text } ?: emptyList(), memOpen, { memOpen = !memOpen }) { more = !more }
+        Spacer(Modifier.height(6.dp))
+        MemorySavedChip(hub)
         LaunchedEffect(chat?.size, pending, busy, err) { listScroll.animateScrollTo(listScroll.maxValue) }
         Column(Modifier.weight(1f).verticalScroll(listScroll), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            if (empty) Spacer(Modifier.height(28.dp))
-            // Greeting speech bubble (always with a tail); the persona & memory dropdown sits inside at its bottom.
-            BubbleCard(Modifier.fillMaxWidth(), tail = 18.dp) {
-                if (empty) {
-                    Text(stringResource(R.string.ask_hello), style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(8.dp))
-                    Text(stringResource(R.string.ask_intro, ai), style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.height(16.dp))
-                    HorizontalDivider(color = LocalContentColor.current.copy(alpha = 0.15f))
-                    Spacer(Modifier.height(4.dp))
-                }
-                val rot by androidx.compose.animation.core.animateFloatAsState(if (more) 180f else 0f, label = "chev")
-                val ink = LocalContentColor.current
-                Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable { more = !more }.padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(36.dp).background(ink.copy(alpha = 0.08f), androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
-                        Icon(Sym.Person, null, Modifier.size(20.dp), tint = ink) }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.ask_persona_title, ai), style = MaterialTheme.typography.titleSmall)
-                        Text(stringResource(R.string.ask_persona_sub, if (hub.prefs.llmProvider == "qwen") "Qwen" else "Grok", ai),
-                            style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.7f))
-                    }
-                    Icon(Sym.ExpandMore, stringResource(if (more) R.string.collapse else R.string.expand), Modifier.graphicsLayer { rotationZ = rot }, tint = ink)
-                }
+            if (more) Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), color = cardColor()) { Column(Modifier.padding(14.dp)) {
                 androidx.compose.animation.AnimatedVisibility(more) {
                     // Inside the bubble the colors are inverted, so fields use the opposite scheme.
-                    MaterialTheme(colorScheme = if (LocalBubble.current.container == androidx.compose.ui.graphics.Color.White) PfLight else PfDark) {
+                    run {
                         Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(stringResource(R.string.ask_persona), style = MaterialTheme.typography.labelLarge)
                             OutlinedTextField(persona, { persona = it }, Modifier.fillMaxWidth(), minLines = 3, shape = MaterialTheme.shapes.large)
@@ -368,6 +307,11 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
                             Text(stringResource(R.string.ask_memory), style = MaterialTheme.typography.labelLarge)
                             if (mems.isNullOrEmpty()) HelpNote(stringResource(R.string.ask_memory_empty, ai))
                             mems?.forEach { m -> key(m.id) { MemoryRow(m) { hub.db.deleteMemory(m.id); r++ } } }
+                            if (!mems.isNullOrEmpty()) TextButton({ confirmMem = true }) { Text("Clear all memory") }
+                            if (confirmMem) AlertDialog(onDismissRequest = { confirmMem = false },
+                                title = { Text("Clear all memory?") }, text = { Text("$ai will forget everything saved about you. This can't be undone.") },
+                                confirmButton = { TextButton({ hub.db.clearMemories(); hub.autoMemory.dismissLast(); confirmMem = false; r++ }) { Text("Clear all") } },
+                                dismissButton = { TextButton({ confirmMem = false }) { Text(stringResource(R.string.cancel)) } })
                             OutlinedTextField(mem, { mem = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.ask_memory_add)) }, shape = MaterialTheme.shapes.large,
                                 trailingIcon = { IconButton({ if (mem.isNotBlank()) { hub.db.addMemory(mem.trim()); mem = ""; r++ } }, enabled = mem.isNotBlank()) { Icon(Sym.Add, stringResource(R.string.add)) } })
                             OutlinedButton({ confirmClear = true }, Modifier.heightIn(min = 48.dp), enabled = !chat.isNullOrEmpty()) {
@@ -376,28 +320,25 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
                     }
                 }
             }
-            if (empty) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    saran.forEach { s -> val t = stringResource(s); SuggestionChip({ send(t) }, { Text(t, Modifier.padding(vertical = 8.dp)) }, Modifier.fillMaxWidth(),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)) }
-                }
-                Spacer(Modifier.height(12.dp))
             }
+            if (empty) AskLanding(listOf(androidx.compose.material.icons.Icons.Default.Search to "What did I say about the trip budget?", Sym.AutoAwesome to "Summarize today's notes",
+                Sym.Notifications to "Remind me to call the team at 2", Sym.CheckCircle to "What's left on my to-do?")) { send(it) }
+            var lastUser = ""
             chat?.forEach { c ->
                 ChatBubble(c.text, fromBf = c.role != "user",
-                    header = (if (c.role == "user") "Mas Yan" else ai) + " · " + fmtClock.format(Date(c.time)))
+                    header = (if (c.role == "user") (hub.prefs.cardName.trim().split(" ").firstOrNull()?.ifBlank { null } ?: "You") else ai) + (if (c.src == "bf") " · from BF" else "") + " · " + fmtClock.format(Date(c.time)))
+                if (c.role == "user") lastUser = c.text
+                else if (lastUser.isNotBlank() && id.yanuar.bf01.ai.PlaceSearch.isPlaceQuery(lastUser)) { val q = id.yanuar.bf01.ai.PlaceSearch.query(lastUser)
+                    OutlinedButton({ id.yanuar.bf01.ai.PlaceSearch.open(ctxChat, q, hub.prefs.lastLat, hub.prefs.lastLon) }, Modifier.heightIn(min = 48.dp)) {
+                        Icon(Icons.Filled.Place, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Search in Google Maps: $q", maxLines = 1) }
+                    lastUser = "" }
             }
-            if (pending.isNotEmpty()) ChatBubble(pending, fromBf = false, header = "Mas Yan" + if (err.isNotEmpty()) " · not sent" else "")
+            if (pending.isNotEmpty()) ChatBubble(pending, fromBf = false, header = (hub.prefs.cardName.trim().split(" ").firstOrNull()?.ifBlank { null } ?: "You") + if (err.isNotEmpty()) " · not sent" else "")
             if (busy) ThinkingBubble(ai)
-            if (err.isNotEmpty() && !busy) ChatErrorCard(err, onRetry = { send(pending) }, onDismiss = { msg = pending; pending = ""; err = "" })
+            if (err.isNotEmpty() && !busy) ChatErrorCard(err, id.yanuar.bf01.ai.chatLabel(hub.prefs), onRetry = { send(pending) }, onDismiss = { msg = pending; pending = ""; err = "" })
         }
         Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(msg, { msg = it }, Modifier.weight(1f).focusRequester(focus), placeholder = { Text(stringResource(R.string.ask_hint, ai)) }, shape = MaterialTheme.shapes.extraLarge, maxLines = 3)
-            Spacer(Modifier.width(10.dp))
-            // Not focusable, so tapping Send keeps the keyboard and focus on the text field.
-            FloatingActionButton({ send(msg) }, Modifier.focusProperties { canFocus = false }) { Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send, stringResource(R.string.send)) }
-        }
+        AskInput(msg, { msg = it }, "Ask anything…", { send(msg) })
     }
     if (confirmClear) AlertDialog({ confirmClear = false }, icon = { Icon(Sym.DeleteSweep, null) }, title = { Text(stringResource(R.string.ask_clear_q)) },
         text = { Text(stringResource(R.string.ask_clear_note, ai)) },
@@ -413,13 +354,13 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
 }
 
 /** Visible error under the chat, with Retry. */
-@Composable fun ChatErrorCard(text: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
+@Composable fun ChatErrorCard(text: String, who: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = cs.errorContainer, contentColor = cs.onErrorContainer) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(androidx.compose.material.icons.Icons.Filled.Warning, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
-                Text("No reply", style = MaterialTheme.typography.titleSmall) }
+                Text("No reply from $who", style = MaterialTheme.typography.titleSmall) }
             Text(text, style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onRetry, Modifier.weight(1f).heightIn(min = 48.dp)) { Icon(Sym.RestartAlt, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Retry", maxLines = 1) }
@@ -430,32 +371,18 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
     }
 }
 
-/** "Test key" button + result line (Connected / failed with reason). */
+/** "Test key" and "Test speech" buttons + one result line (Connected / Heard ... / failed with reason). */
 @Composable fun TestKeyRow(hub: Hub, onDone: () -> Unit) {
     val scope = rememberCoroutineScope(); var busy by remember { mutableStateOf(false) }; var res by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
-    ActionButton(if (busy) "Testing…" else "Test key", enabled = !busy, icon = Sym.SmartToy) { busy = true; res = null
+    var which by remember { mutableStateOf("") }
+    ActionButton(if (busy && which == "key") "Testing…" else "Test key", enabled = !busy, icon = Sym.SmartToy) { busy = true; which = "key"; res = null
         scope.launch { val r = id.yanuar.bf01.ai.testKey(hub.prefs)
             res = r.fold({ true to it }, { false to "Failed · " + id.yanuar.bf01.ai.friendlyError(it) +
                 if (hub.prefs.llmProvider == "qwen") "\nTried: " + id.yanuar.bf01.ai.QwenUrl.host(hub.prefs.qwenBaseUrl) else "" }); busy = false; onDone() } }
+    ActionButton(if (busy && which == "speech") "Listening…" else "Test speech", enabled = !busy, icon = androidx.compose.material.icons.Icons.Filled.PlayArrow) { busy = true; which = "speech"; res = null
+        scope.launch { val r = hub.testSpeech(); res = r.ok to r.text; busy = false; onDone() } }
     res?.let { (ok, t) -> Text(t, style = MaterialTheme.typography.bodyMedium,
         color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
-}
-
-@Composable fun KartuScreen(hub: Hub) {
-    val p = hub.prefs; val scope = rememberCoroutineScope()
-    var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.cardName) }; var title by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.cardTitle) }
-    var phone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.cardPhone) }; var msg by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(p.cardMsg) }; var status by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
-    fun save() { p.cardName = name; p.cardTitle = title; p.cardPhone = phone; p.cardMsg = msg }
-    val link = "https://wa.me/${phone.filter(Char::isDigit)}?text=${Uri.encode(msg)}"
-    Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedTextField(name, { name = it.uppercase() }, Modifier.fillMaxWidth(), label = { Text("Name") })
-        OutlinedTextField(title, { title = it.uppercase() }, Modifier.fillMaxWidth(), label = { Text("Job title") })
-        OutlinedTextField(phone, { phone = it }, Modifier.fillMaxWidth(), label = { Text("WhatsApp number (62…)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
-        OutlinedTextField(msg, { msg = it }, Modifier.fillMaxWidth(), label = { Text("Opening message") })
-        QrPreview(link); Text(link, style = MaterialTheme.typography.bodySmall)
-        ActionButton("Save & send", primary = true, icon = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send) { save(); scope.launch { status = if (hub.sendNameCard()) "Sent to BF" else "Failed: BF is not connected" } }
-        Text(status)
-    }
 }
 
 @Composable fun MenuScreen(hub: Hub) {
@@ -491,9 +418,7 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
                 style = MaterialTheme.typography.bodyMedium)
             if (st.message.isNotBlank()) { Spacer(Modifier.height(4.dp)); Text(st.message, style = MaterialTheme.typography.bodyMedium) }
             Spacer(Modifier.height(14.dp))
-            ActionButton(stringResource(R.string.rec_sync), primary = true, enabled = ble == BleManager.State.READY && !busy, icon = Sym.CloudSync) {
-                scope.launch { hub.recordings.run(manual = true) } }
-            if (ble != BleManager.State.READY) HelpNote("Sync is available once BF is connected.")
+            SyncStatusLine(hub)
         }
         HelpNote(stringResource(R.string.rec_how), stringResource(R.string.rec_how_detail))
         val rot by androidx.compose.animation.core.animateFloatAsState(if (adv) 180f else 0f, label = "adv")
@@ -526,14 +451,14 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
 }
 
 /** Putar/stop rekaman di HP. */
-@Composable fun PlayButton(path: String) {
+@Composable fun PlayButton(path: String, small: Boolean = false) {
     var player by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
     DisposableEffect(path) { onDispose { player?.release(); player = null } }
     val playing = player != null
     FilledTonalIconButton({
         if (playing) { player?.release(); player = null }
         else player = runCatching { android.media.MediaPlayer().apply { setDataSource(path); setOnCompletionListener { it.release(); player = null }; prepare(); start() } }.getOrNull()
-    }, Modifier.size(48.dp)) { Icon(if (playing) androidx.compose.material.icons.Icons.Default.Close else androidx.compose.material.icons.Icons.Default.PlayArrow, if (playing) "Stop" else "Play") }
+    }, Modifier.size(if (small) 36.dp else 48.dp)) { Icon(if (playing) Sym.StopCircle else androidx.compose.material.icons.Icons.Default.PlayArrow, if (playing) "Stop" else "Play", Modifier.size(if (small) 20.dp else 24.dp)) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -575,25 +500,83 @@ fun notifAccessGranted(ctx: android.content.Context): Boolean =
 /** Beranda Setelan: kartu WHERE'S MINE + 6 kategori berikon (sub-halaman). */
 @Composable fun PengaturanScreen(hub: Hub, open: (Screen) -> Unit = {}) {
     val p = hub.prefs; val ctx = LocalContext.current
-    val linked by hub.linked.collectAsState(); val paused by hub.forwardPaused.collectAsState(); val st by hub.ble.state.collectAsState()
+    val linked by hub.linked.collectAsState(); val st by hub.ble.state.collectAsState(); val info by hub.ble.info.collectAsState()
+    val fails by hub.reconnectFails.collectAsState(); val remoteFw by hub.fwUpdate.remote.collectAsState()
+    var help by remember { mutableStateOf(false) }; var more by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val usage = rememberLoaded(hub, "pemakaian") { hub.db.usageThisMonth() }
+    LaunchedEffect(Unit) { hub.fwUpdate.checkLatest() }
+    val ready = st == id.yanuar.bf01.ble.BleManager.State.READY || st == id.yanuar.bf01.ble.BleManager.State.CONNECTED
+    val neverPaired = p.deviceAddress.isNullOrBlank()
+    val name = p.deviceName.ifBlank { "BF" }
+    val owner = p.cardName.trim().split(" ").firstOrNull().orEmpty().lowercase().replaceFirstChar { it.uppercase() }.ifBlank { "You" }
+    val fwHave = id.yanuar.bf01.fw.FirmwareImage.displayVersion(info?.fw)
+    val fwAvail = remoteFw?.version ?: id.yanuar.bf01.fw.FirmwareImage.LATEST
+    val fwNew = info?.fw != null && !fwHave.contains(fwAvail)
+    val ssid = p.wifi(0).first
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        WheresMineCard(hub)
-        NotifAccessCard()
-        NavCard {
-            NavRow(Sym.SmartToy, "AI provider", (if (p.llmProvider == "qwen") "Qwen · " + (if (p.qwenKey.isBlank()) "no key yet" else "key saved")
-                else "Grok · " + (if (p.xaiKey.isBlank()) "no key yet" else "key saved"))) { open(Screen.SetAi) }
-            NavDivider()
-            NavRow(Sym.RecordVoiceOver, "BF & voice", "Sleep ${p.sleepSec} s · quiet hours ${p.quietStart}–${p.quietEnd}") { open(Screen.SetSuara) }
-            NavDivider()
-            NavRow(Sym.Bluetooth, "Connection & network", "${linkLabel(linked, st).lowercase().replaceFirstChar { it.uppercase() }} · Wi-Fi, phone server") { open(Screen.SetJaringan) }
-            NavDivider()
-            NavRow(Sym.Notifications, "Music, Maps & alerts", "What BF can show from your phone") { open(Screen.SetIzin) }
-            NavDivider()
-            NavRow(Sym.DeveloperBoard, "Device", "Pairing, name card, BF menu, files") { open(Screen.SetPerangkat) }
-            NavDivider()
-            NavRow(Sym.BarChart, "Usage & about", "${usage?.let { "%.0f".format(it.first + it.second) } ?: "–"} min of audio this month · v${appVersion(ctx)}") { open(Screen.SetPemakaian) }
+        if (neverPaired) Section("Start here") {
+            Text("$name hasn't been connected to this phone yet. Turn it on, hold it near the phone, then tap the button below.", style = MaterialTheme.typography.bodyLarge)
+            ActionButton("Connect $name", primary = true, icon = Sym.Bluetooth) { open(Screen.Pairing) }
         }
+        // v0.4.0 (mockup v5.13 · 08): profile card, DEVICE and APP groups.
+        var renaming by remember { mutableStateOf(false) }; var theming by remember { mutableStateOf(false) }
+        val rev by hub.revision.collectAsState(); val shownName = remember(rev) { p.deviceName.ifBlank { "BF" } }
+        if (renaming) RenameDeviceDialog(shownName, { DeviceRename.apply(hub, it); renaming = false }) { renaming = false }
+        if (theming) ThemeDialog(AppTheme.mode, { AppTheme.set(it) }) { theming = false }
+        SettingsContent(owner, "Name, avatar, Say Hi · backup on", { open(Screen.Kartu) },
+            device = listOf(
+                SetRow(Sym.Edit, "Device name", shownName, { renaming = true }),
+                SetRow(Sym.Apps, "Character", "Menu, faces & order on $name", { open(Screen.Menu) }, accent = Pop.Orange, deviceThumb = true),
+                SetRow(Sym.Link, "Connection", if (ready) (if (ssid.isNotBlank()) "Wi-Fi \u201c$ssid\u201d" else "Bluetooth · connected") else linkLabel(linked, st),
+                    { open(Screen.SetJaringan) }, chip = "Help", onChip = { help = !help }),
+                SetRow(Sym.Download, "Software update", "$name $fwHave" + if (fwNew) " · $fwAvail available" else " · up to date", { open(Screen.SetFirmware) },
+                    chip = if (fwNew) "New" else null, chipYellow = true),
+                SetRow(Sym.LightMode, "Sleep & wake", "Sleep after ${p.sleepSec} s · quiet ${p.quietStart}:00–${p.quietEnd}:00", { open(Screen.SetSuara) }, accent = Pop.Yellow),
+            ),
+            app = listOf(
+                SetRow(Sym.AutoAwesome, "AI & voice", (if (p.llmProvider == "qwen") "Qwen" else "Grok") + " · voice ${p.ttsVoice}" + if ((if (p.llmProvider == "qwen") p.qwenKey else p.xaiKey).isBlank()) " · no key yet" else "", { open(Screen.SetAi) }),
+                SetRow(Sym.Notifications, "Notifications", "Music, Maps & what $name may show", { open(Screen.SetIzin) }),
+                SetRow(Sym.BarChart, "Usage", "Features, battery & AI cost", { open(Screen.Usage) }),
+                SetRow(Sym.Palette, "Theme", null, { open(Screen.ThemeBoard) }, swatches = true),
+                SetRow(Sym.Shield, "Privacy & data", "Export, clear, audio & chats", { open(Screen.Privacy) }),
+            ))
+        if (!neverPaired && (fails >= 2 || help)) ConnectHelpCard(hub)
+        if (!neverPaired && !ready) ActionButton("Reconnect", primary = true, icon = Sym.Refresh) { hub.reconnect() }
+        AppUpdateCard(always = true)
+        // 3b) AI usage (tokens, estimated cost, monthly projection)
+        val aiDays = rememberLoaded(hub, "aiusage") { loadAiDays(hub) }
+        NavCard {
+            val sub = aiDays?.let { d -> UsageReports.build(d, java.time.LocalDate.now(), id.yanuar.bf01.ai.AiPricing.decode(p.aiPriceOverrides), p.idrPerUsd.toDouble()).month
+                .let { m -> if (m.calls == 0) "Tokens, estimated cost and monthly projection" else "This month ≈ ${UsageReports.rupiah(m.usd * p.idrPerUsd)} · ${UsageReports.tokens(m.tokens)} tokens (estimate)" } } ?: "Tokens, estimated cost and monthly projection"
+            NavRow(Sym.BarChart, stringResource(Screen.AiUsage.title), sub) { open(Screen.AiUsage) }
+        }
+        // 5) Pengaturan lainnya (tertutup)
+        NavCard {
+            NavRow(Sym.ExpandMore, "More settings", if (more) "Tap to close" else "Usage & about, battery, phone link") { more = !more }
+            if (more) {
+                NavDivider()
+                NavRow(Sym.Notifications, "Music, Maps & notifications", "What BF may show") { open(Screen.SetIzin) }
+                NavRow(Sym.Bluetooth, "$name isn't connecting", "Reconnect tips") { open(Screen.ConnHelp) }
+                NavDivider()
+                NavRow(Sym.RecordVoiceOver, "BF & sound", "Sleep ${p.sleepSec} s · quiet hours ${p.quietStart}–${p.quietEnd}") { open(Screen.SetSuara) }
+                NavDivider()
+                NavRow(Sym.Bluetooth, "Connection & network", "Wi-Fi, phone server") { open(Screen.SetJaringan) }
+                NavDivider()
+                NavRow(Sym.Person, stringResource(Screen.Kartu.title), "QR codes with logos on BF") { open(Screen.Kartu) }
+                NavDivider()
+                NavRow(Sym.DeveloperBoard, stringResource(Screen.Menu.title), "BF menu items & order") { open(Screen.Menu) }
+                NavDivider()
+                NavRow(Sym.Dns, stringResource(Screen.File.title), "Sync recordings, memory card, export") { open(Screen.File) }
+                NavDivider()
+                NavRow(Sym.BarChart, "Usage & about", "${usage?.let { "%.0f".format(it.first + it.second) } ?: "–"} audio min this month · v${appVersion(ctx)}") { open(Screen.SetPemakaian) }
+            }
+        }
+        if (more) {
+            if (!neverPaired) { Section("$name link") { RestartLine(info, hub); LinkToggle(hub, linked) }
+                BatteryCard(info); DiagnostikCard(hub, info); WaktuTidurCard(hub) }
+            WheresMineCard(hub)
+        }
+        NotifAccessCard()
         VersionFooter()
     }
 }
@@ -631,11 +614,11 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
             val bc = ButtonDefaults.buttonColors(containerColor = cs.surface, contentColor = cs.onSurface, disabledContainerColor = cs.surface.copy(alpha = 0.4f),
                 disabledContentColor = cs.onSurface.copy(alpha = 0.5f))
             AdaptiveRow {
-                Button({ val on = !ringing; ringing = on; scope.launch { hub.ble.write(BfProtocol.FIND, BfProtocol.find(on)) } }, Modifier.cell(1f).heightIn(min = 48.dp),
+                Button({ val on = !ringing; ringing = on; if (on) hub.db.addFeatureUse(id.yanuar.bf01.svc.Feature.WHERES_MINE); scope.launch { hub.ble.write(BfProtocol.FIND, BfProtocol.find(on)) } }, Modifier.cell(1f).heightIn(min = 48.dp),
                     colors = bc, contentPadding = PaddingValues(horizontal = 12.dp)) {
                     Icon(if (ringing) Sym.StopCircle else Sym.NotificationsActive, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
                     Text(if (ringing) "Stop" else "Ring", maxLines = 1) }
-                Button({ openMaps(ctx, p.lastLat, p.lastLon) }, Modifier.cell(1.25f).heightIn(min = 48.dp), enabled = has, colors = bc,
+                Button({ hub.db.addFeatureUse(id.yanuar.bf01.svc.Feature.WHERES_MINE); openMaps(ctx, p.lastLat, p.lastLon) }, Modifier.cell(1.25f).heightIn(min = 48.dp), enabled = has, colors = bc,
                     contentPadding = PaddingValues(horizontal = 12.dp)) {
                     Icon(Sym.LocationOn, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Open in Maps", maxLines = 1) }
             }
@@ -772,10 +755,11 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
             HelpNote("On the phone hotspot it is often 192.168.43.1, but can differ.", "When BF uses this phone's hotspot, the IP is often 192.168.43.1, but can differ. Check Android Settings › Mobile hotspot.")
             AdaptiveRow {
                 ActionButton("Save", Modifier.cell(1f), icon = Sym.Save) { p.serverHost = host.trim() }
-                OutlinedButton({ p.rotateToken(); r++ }, Modifier.cell(1f).heightIn(min = 48.dp)) {
+                OutlinedButton({ p.rotateToken(); p.clearPairing(); p.openPairing(); r++ }, Modifier.cell(1f).heightIn(min = 48.dp)) {
                     Icon(Sym.Key, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("New token", maxLines = 1) }
             }
-            HelpNote("After changing the token, send it again from Pairing.")
+            if (p.pairedDeviceId.isNotEmpty()) HelpNote("Paired BF Device-Id: ${p.pairedDeviceId}")
+            HelpNote("After changing the token, send it again from Pairing. That also re-opens device pairing for 10 minutes.")
         }
     }
 }
@@ -787,7 +771,28 @@ fun openMaps(ctx: android.content.Context, lat: Double, lon: Double) {
     val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(owner) { val o = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) { notif = notifAccessGranted(ctx); dnd = dndAccessGranted(ctx) } }
         owner.lifecycle.addObserver(o); onDispose { owner.lifecycle.removeObserver(o) } }
+    val dev = p.deviceName.ifBlank { "BF" }
     SubPage {
+        NotificationsContent(dev,
+            listOf(Triple("Reminders", "To-dos that are due", p.nReminders), Triple("$dev needs you", "When BF waits for an answer", p.nNeedsYou), Triple("Sync finished", "New notes arrived", p.nSyncDone)),
+            { i, v -> when (i) { 0 -> p.nReminders = v; 1 -> p.nNeedsYou = v; else -> p.nSyncDone = v }; r++ },
+            listOf(Triple("Say it out loud", "BF speaks reminders", p.nSpeak), Triple("Quiet during night sleep", "No voice in quiet hours", p.nQuietNight)),
+            { i, v -> when (i) { 0 -> p.nSpeak = v; else -> p.nQuietNight = v }; r++ })
+        Section("Live check") {
+            val mu by hub.lastMapsUpdate.collectAsState(); val sent by hub.lastSentToBf.collectAsState()
+            val fmt = { t: Long -> java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(t)) }
+            Text("Notification access: " + if (notif) "on" else "OFF (BF can't see Maps or music)", style = MaterialTheme.typography.bodyMedium)
+            Text("Last Maps update: " + (mu?.let { fmt(it.first) + " · " + it.second } ?: "none yet"), style = MaterialTheme.typography.bodyMedium)
+            Text("Last sent to BF: " + (sent?.let { fmt(it.first) + " · " + it.second.replace('|', ' ').take(60) } ?: "none yet"), style = MaterialTheme.typography.bodyMedium)
+        }
+        Section("Auto-open on BF") {
+            var ao by remember { mutableStateOf(p.autoOpen) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Open JAM ON / TAKE ME automatically", Modifier.weight(1f))
+                Switch(ao, { ao = it; p.autoOpen = it; hub.scope.launch { hub.pushAutoOpen() } })
+            }
+            HelpNote("BF shows the music page when a song starts, and the map page when Google Maps navigation starts. It never interrupts a recording, a chat with AI, or a reminder.")
+        }
         Section("Permissions") {
             HelpNote("Android asks for these once. Tap an item to open its system setting.")
             PermRow("Notification access", "Lets BF show the song playing (JAM ON) and Google Maps directions (TAKE ME).", notif) {
@@ -832,13 +837,18 @@ fun dndAccessGranted(ctx: android.content.Context): Boolean =
 
 @Composable fun SetPerangkatScreen(hub: Hub, open: (Screen) -> Unit) {
     val info by hub.ble.info.collectAsState()
+    val fails by hub.reconnectFails.collectAsState(); var help by remember { mutableStateOf(false) }
+    val remoteFw by hub.fwUpdate.remote.collectAsState()
+    LaunchedEffect(Unit) { hub.fwUpdate.checkLatest() }
     SubPage {
+        if (fails >= 2 || help) ConnectHelpCard(hub)
+        TextButton({ help = !help }) { Text("Trouble connecting?") }
         NavCard {
-            NavRow(Sym.SystemUpdate, stringResource(Screen.SetFirmware.title), "BF ${id.yanuar.bf01.fw.FirmwareImage.displayVersion(info?.fw)} · latest v${id.yanuar.bf01.fw.FirmwareImage.LATEST}") { open(Screen.SetFirmware) }
+            NavRow(Sym.SystemUpdate, stringResource(Screen.SetFirmware.title), "BF ${id.yanuar.bf01.fw.FirmwareImage.displayVersion(info?.fw)} · available v${remoteFw?.version ?: id.yanuar.bf01.fw.FirmwareImage.LATEST}") { open(Screen.SetFirmware) }
             NavDivider()
             NavRow(Sym.Bluetooth, stringResource(Screen.Pairing.title), "Connect a new BF & send Wi-Fi") { open(Screen.Pairing) }
             NavDivider()
-            NavRow(Sym.Person, stringResource(Screen.Kartu.title), "WhatsApp QR on BF's screen") { open(Screen.Kartu) }
+            NavRow(Sym.Person, stringResource(Screen.Kartu.title), "QR codes with logos on BF") { open(Screen.Kartu) }
             NavDivider()
             NavRow(Sym.DeveloperBoard, stringResource(Screen.Menu.title), "BF menu items & order") { open(Screen.Menu) }
             NavDivider()
@@ -886,4 +896,250 @@ interface CellScope { fun Modifier.cell(weight: Float): Modifier }
             list.forEach { m -> DropdownMenuItem({ Column { Text(m.label); Text(m.id, style = MaterialTheme.typography.bodySmall) } }, { pick(m.id); open = false }) }
         }
     }
+}
+
+
+/** v0.3.9: "Saved to memory: …" dengan Undo, supaya pengguna selalu tahu apa yang diingat. */
+@Composable fun MemorySavedChip(hub: Hub) {
+    val saved by hub.autoMemory.lastSaved.collectAsState()
+    val s = saved ?: return
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.secondaryContainer) {
+        Row(Modifier.padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Saved to memory: " + s.facts.joinToString("; "), Modifier.weight(1f).padding(vertical = 10.dp), style = MaterialTheme.typography.bodyMedium)
+            TextButton({ hub.autoMemory.undoLast() }) { Text("Undo") }
+            TextButton({ hub.autoMemory.dismissLast() }) { Text("OK") }
+        }
+    }
+}
+
+
+const val CONNECT_HELP = "Can't connect? On BF: open TWEAKS, hold Forget phone, swipe right to confirm. Then tap Reconnect and enter the PAIR code shown on BF."
+
+/** v0.3.9: bantuan bila bond BF dan HP tidak cocok lagi (Reconnect gagal terus). */
+@Composable fun ConnectHelpCard(hub: Hub) {
+    Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.tertiaryContainer) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(CONNECT_HELP, style = MaterialTheme.typography.bodyMedium)
+            ActionButton("Reconnect", Modifier.fillMaxWidth(), primary = true, icon = Sym.Refresh) { hub.reconnect() }
+        }
+    }
+}
+
+
+/** v0.3.9.5: grup "Koneksi" ringkas: Bluetooth ✓ / Wi-Fi ✗ (menggantikan chip Wi-Fi on/off). */
+@Composable fun KoneksiGroup(hub: Hub, ready: Boolean, info: BfProtocol.Info?) {
+    val cs = MaterialTheme.colorScheme
+    @Composable fun item(ok: Boolean, label: String) = Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (ok) androidx.compose.material.icons.Icons.Filled.CheckCircle else androidx.compose.material.icons.Icons.Filled.Clear,
+            if (ok) "on" else "off", Modifier.size(18.dp), tint = if (ok) cs.primary else cs.onSurfaceVariant)
+        Spacer(Modifier.width(6.dp)); Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+        item(ready, "Bluetooth")
+        item(info?.wifiOn == true || hub.server.clients > 0, "Wi-Fi")
+    }
+}
+
+/** Baris "Last restart" dengan tombol Salin (kembali tampil sejak v0.3.9.5). */
+@Composable fun RestartLine(info: BfProtocol.Info?, hub: Hub? = null) {
+    val line = info?.let { BfProtocol.lastRestartText(it) } ?: return
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(line, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val ctx = LocalContext.current
+        TextButton({ clip.setText(androidx.compose.ui.text.AnnotatedString(buildString {
+            appendLine(line)
+            appendLine("Details (why/task/addr/breadcrumb): ${info.crashInfo.ifBlank { "-" }}")
+            if (info.lastCrash.isNotBlank()) appendLine("Crash: ${info.lastCrash}")
+            appendLine("Last AI start: ${info.aiSrc.ifBlank { "-" }}")
+            hub?.lastDeviceAiError?.value?.let { (t, m) -> appendLine("Last AI error (${java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(t))}): $m") }
+            append("fw ${info.fw} · app ${appVersion(ctx)}")
+        })) }) { Text("Copy") }
+    }
+}
+
+/** Diagnostik: restart terakhir lengkap, error AI terakhir dari BF, status server di HP. */
+@Composable fun DiagnostikCard(hub: Hub, info: BfProtocol.Info?) {
+    val aiErr by hub.lastDeviceAiError.collectAsState()
+    Section("Diagnostics") {
+        if (info == null) Text("Connect BF to see restart info.", style = MaterialTheme.typography.bodyMedium)
+        else {
+            RestartLine(info, hub)
+            if (info.crashInfo.isNotBlank()) Text("Details: ${info.crashInfo}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        aiErr?.let { (t, m) -> Text("Last AI chat from BF failed (${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(t))}): $m",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        Text(if (hub.server.clients > 0) "AI link on phone: BF is chatting" else "AI link on phone: ready (${hub.prefs.serverHost})",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** v0.3.9.5: Hemat baterai / Waktu tidur — kembali ke Home, tidur layar, mati otomatis. */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable fun WaktuTidurCard(hub: Hub) {
+    val p = hub.prefs; val scope = rememberCoroutineScope(); var r by remember { mutableIntStateOf(0) }
+    var saved by remember { mutableStateOf("") }; var savedOk by remember { mutableStateOf(true) }
+    fun send() = scope.launch {
+        saved = "Sending…"; savedOk = true
+        val ack = async { kotlinx.coroutines.withTimeoutOrNull(6_000) { hub.setAck.first { s -> s == "I" } } }
+        kotlinx.coroutines.yield()
+        if (!hub.sendPowerTimes()) { ack.cancel(); saved = "Not saved: BF isn't connected."; savedOk = false; return@launch }
+        if (ack.await() != null) { saved = "Saved to BF ✓"; savedOk = true }
+        else { saved = "BF didn't confirm. Update BF's firmware or reconnect, then try again."; savedOk = false }
+    }
+    @OptIn(ExperimentalLayoutApi::class) @Composable fun pick(title: String, opts: List<Pair<Int, String>>, cur: Int, set: (Int) -> Unit) {
+        Text(title, style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            opts.forEach { (v, l) -> FilterChip(cur == v, { set(v); r++; send() }, { Text(l) }) }
+        }
+    }
+    Section("Sleep timer") {
+        key(r) {
+            pick("Back to Home after idle", listOf(5 to "5 s", 10 to "10 s", 20 to "20 s", 30 to "30 s"), p.homeIdleSec) { p.homeIdleSec = it }
+            pick("Screen sleeps after", listOf(30 to "30 s", 60 to "1 min", 120 to "2 min", 300 to "5 min"), p.sleepSec) { p.sleepSec = it }
+            pick("Auto power off while asleep", listOf(0 to "Never", 15 to "15 min", 30 to "30 min", 60 to "60 min"), p.autoOffMin) { p.autoOffMin = it }
+        }
+        if (saved.isNotEmpty()) Text(saved, style = MaterialTheme.typography.bodyMedium,
+            color = if (savedOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+        HelpNote("Sleeping sooner saves battery. Auto power off saves the most, but BF needs the PWR button to turn back on and reminders won't ring while off.")
+    }
+}
+
+/** v0.3.9.7: AI chats started on BF, as WhatsApp-style threads with your voice transcribed. */
+@Composable fun AiChatsScreen(hub: Hub) {
+    val rev by hub.revision.collectAsState()
+    var open by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val threads = rememberLoaded(hub, "aithreads", rev) { hub.db.aiThreads() }
+    if (open.isNotEmpty()) {
+        val msgs = rememberLoaded(hub, "aithread_$open", rev, open) { hub.db.aiThread(open) }
+        androidx.activity.compose.BackHandler { open = "" }
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PfBackHeader("Chat", "Ask BF · kept on this phone", { open = "" })
+            msgs?.forEach { m -> Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.role == "user") Arrangement.End else Arrangement.Start) {
+                Card(Modifier.widthIn(max = 300.dp), colors = CardDefaults.cardColors(if (m.role == "user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                    Column(Modifier.padding(12.dp)) {
+                        if (m.role == "user") Text("🎤 Voice", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(m.text, style = MaterialTheme.typography.bodyLarge)
+                        Text(fmtClock.format(Date(m.time)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.End))
+                    } } } }
+        }
+        return
+    }
+    var q by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val rows = (threads ?: emptyList()).filter { q.isBlank() || it.second.text.contains(q, true) }.map { (tid, last) ->
+        ChatRowUi(tid, last.text.take(32).ifBlank { "Chat" }, (if (last.role == "user") "You: " else "BF: ") + last.text, fmtClock.format(Date(last.time)), dayLabel(last.time), hub.aiUnread(tid)) }
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        ChatHistoryContent(rows, q, { q = it }, { hub.openScreen?.invoke(Screen.Ngobrol) }, { open = it }, null)
+        Spacer(Modifier.height(24.dp))
+    }
+}
+@Composable fun PrivacyScreen(hub: Hub) {
+    val rev by hub.revision.collectAsState()
+    val notes = rememberLoaded(hub, "priv_n", rev) { hub.db.notes().count { it.type == "NOTE" } } ?: 0
+    val todos = rememberLoaded(hub, "priv_t", rev) { hub.db.tasks().size } ?: 0
+    val chats = rememberLoaded(hub, "priv_c", rev) { hub.db.chat().size } ?: 0
+    val ctx = LocalContext.current
+    var confirm by remember { mutableStateOf(false) }
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        PrivacyContent(notes, todos, chats, "-", hub.prefs.keepAudio, hub.prefs.autoDeleteChats,
+            { hub.prefs.keepAudio = it }, { hub.prefs.autoDeleteChats = it },
+            onExport = {
+                val body = hub.db.notes().joinToString("\n\n") { id.yanuar.bf01.svc.NoteExport.text(it) }
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, body.ifBlank { "No notes yet." })
+                }
+                ctx.startActivity(android.content.Intent.createChooser(send, "Export my data"))
+            },
+            onClear = { confirm = true })
+    }
+    if (confirm) AlertDialog({ confirm = false }, title = { Text("Clear data?") },
+        text = { Text("Deletes notes, to-dos and chats on this phone. BF recordings stay on the device.") },
+        confirmButton = { TextButton({ hub.db.clearChat(); confirm = false }) { Text("Clear chats", color = Pop.Red) } },
+        dismissButton = { TextButton({ confirm = false }) { Text("Cancel") } })
+}
+
+@Composable fun ConnHelpScreen(hub: Hub) {
+    val info by hub.ble.info.collectAsState()
+    val dev = hub.prefs.deviceName.ifBlank { "BF" }
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        ConnHelpContent(dev, "Recently" + (info?.let { " · battery ${it.batt}%" } ?: ""),
+            onReconnect = { hub.reconnect() },
+            onRing = { hub.scope.launch { hub.ble.write(id.yanuar.bf01.ble.BfProtocol.FIND, id.yanuar.bf01.ble.BfProtocol.find(true)) } },
+            onMaps = {})
+    }
+}
+
+@Composable fun ThemeBoardScreen(hub: Hub) {
+    var mode by remember { mutableStateOf(hub.prefs.themeMode) }
+    var accent by remember { mutableStateOf(hub.prefs.accent) }
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        ThemeBoardContent(mode, accent, {
+            mode = it; AppTheme.set(it)
+        }, {
+            accent = it; AppTheme.pickAccent(it)
+        })
+    }
+}
+
+@Composable fun SearchScreen(hub: Hub, back: () -> Unit) {
+    val rev by hub.revision.collectAsState()
+    val notes = rememberLoaded(hub, "search_notes", rev) { hub.db.notes() }
+    val tasks = rememberLoaded(hub, "search_tasks", rev) { hub.db.tasks() }
+    var q by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var filter by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var recent by remember { mutableStateOf(hub.prefs.plainRecent()) }
+    fun saveRecent(term: String) {
+        val t = term.trim(); if (t.isEmpty()) return
+        recent = (listOf(t) + recent.filter { !it.equals(t, true) }).take(8)
+        hub.prefs.setPlainRecent(recent)
+    }
+    val results = remember(notes, tasks, q, filter) {
+        if (q.isBlank()) emptyList() else {
+            val qq = q.trim()
+            buildList {
+                if (filter != 2) notes.orEmpty().filter { it.type == "NOTE" }.forEach { n ->
+                    val hay = n.summary + n.transcript + n.tags + n.file
+                    if (hay.contains(qq, true)) add("note:${n.file}" to (n.summary.ifBlank { n.transcript }.ifBlank { n.file }.take(80)))
+                }
+                if (filter == 0) tasks.orEmpty().forEach { t ->
+                    if (t.title.contains(qq, true) || t.detail.contains(qq, true)) add("task:${t.id}" to t.title)
+                }
+            }
+        }
+    }
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        SearchContent(q, { q = it }, filter, { filter = it }, recent, { q = it; saveRecent(it) },
+            { t -> recent = recent.filter { it != t }; hub.prefs.setPlainRecent(recent) }, results,
+            onOpen = { id -> when {
+                id.startsWith("note:") -> hub.openScreen?.invoke(Screen.Catatan) // detail via notes tab for now
+                id.startsWith("task:") -> hub.openScreen?.invoke(Screen.Tugas)
+            } }, back = back)
+    }
+}
+
+@Composable fun OnboardScreen(hub: Hub, done: () -> Unit) {
+    var step by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(hub.prefs.deviceName.ifBlank { "BF" }) }
+    var face by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var tries by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(2) }
+    var aiFace by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("☻") }
+    var bt by remember { mutableStateOf(true) }; var notif by remember { mutableStateOf(true) }; var mic by remember { mutableStateOf(true) }
+    val wifi = hub.prefs.wifi(0).first.ifBlank { "Choose Wi-Fi" }
+    when (step) {
+        0 -> OnboardWelcome(onStart = { step = 1 }, onHave = { hub.prefs.onboarded = true; done() })
+        1 -> OnboardSearching(onCancel = { step = 0 })
+        2 -> OnboardPairCode("472", "Signal good · ready", onPair = { step = 3 }, onBack = { step = 1 })
+        3 -> OnboardCharacter(face, { face = it }, onContinue = { step = 4 },
+            onPhoto = { step = 30 }, onAi = { step = 31 })
+        30 -> CharacterPhotoFlow(onPick = {}, onContinue = { step = 4 }, onBack = { step = 3 })
+        31 -> CharacterAiFlow(tries, aiFace,
+            onTry = { if (tries > 0) { tries -= 1; aiFace = listOf("☺", "☻", "◉", "◈").random() } },
+            onUse = { step = 4 }, onBack = { step = 3 })
+        4 -> OnboardName(name, { name = it }, onNext = { hub.prefs.deviceName = name.trim().ifBlank { "BF" }; step = 5 })
+        5 -> OnboardWifiPerms(wifi, bt, notif, mic, onWifi = { hub.openScreen?.invoke(Screen.SetJaringan) },
+            onToggle = { label, v -> when (label) { "Bluetooth" -> bt = v; "Notifications" -> notif = v; "Microphone" -> mic = v } },
+            onContinue = { step = 6 })
+        else -> OnboardDone(hub.prefs.deviceName.ifBlank { "BF" }) { hub.prefs.onboarded = true; done() }
+    }
+    if (step == 1) LaunchedEffect(Unit) { kotlinx.coroutines.delay(1200); step = 2 }
 }

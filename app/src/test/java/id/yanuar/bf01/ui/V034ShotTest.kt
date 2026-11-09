@@ -32,7 +32,7 @@ class V034ShotTest {
         RuntimeEnvironment.setFontScale(fs); val h = hub()
         rule.setContent { PocketFriendTheme(true) { App(h, s) } }
         rule.waitForIdle(); act(h); rule.waitForIdle()
-        rule.onRoot().captureRoboImage("/workspace/pf_v034/shots/${name}_fs${(fs * 100).toInt()}.png")
+        rule.onRoot().captureRoboImage("build/roborazzi/${name}_fs${(fs * 100).toInt()}.png")
     }
     @Test fun home() = shot(Screen.Beranda, "Home")
     @Test fun home130() = shot(Screen.Beranda, "Home", 1.3f)
@@ -41,7 +41,7 @@ class V034ShotTest {
     @Test fun status() = shot(Screen.Pengaturan, "StatusSheet") { rule.onAllNodes(hasContentDescription("status", substring = true, ignoreCase = true) and hasClickAction())[0].performClick() }
     @Test fun status130() = shot(Screen.Pengaturan, "StatusSheet", 1.3f) { rule.onAllNodes(hasContentDescription("status", substring = true, ignoreCase = true) and hasClickAction())[0].performClick() }
     @Test fun askKeepsFocusAfterSend() = shot(Screen.Ngobrol, "AskAI_after_send") { h ->
-        h.db.addChat("user", "halo"); h.db.addChat("assistant", "Halo Mas Yan! Ada yang bisa aku bantu?")
+        h.db.addChat("user", "halo"); h.db.addChat("assistant", "Halo Alex! Ada yang bisa aku bantu?")
         val f = rule.onNode(hasSetTextAction()); f.performClick(); f.performTextInput("test")
         rule.onNodeWithContentDescription("Send").performClick(); rule.waitForIdle()
         rule.onNode(hasSetTextAction()).assertIsFocused()

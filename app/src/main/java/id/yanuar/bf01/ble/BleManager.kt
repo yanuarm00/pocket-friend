@@ -46,7 +46,7 @@ class BleManager(private val ctx: Context, private val scope: CoroutineScope) {
     private var wantConnected = false
 
     private sealed class Op { abstract val uuid: java.util.UUID
-        data class W(override val uuid: java.util.UUID, val data: ByteArray, val done: CompletableDeferred<Boolean>) : Op()
+        data class W(override val uuid: java.util.UUID, val data: ByteArray, val done: CompletableDeferred<Boolean>, val noRsp: Boolean = false) : Op()
         data class R(override val uuid: java.util.UUID, val done: CompletableDeferred<ByteArray?>) : Op()
     }
     private val ops = Channel<Op>(Channel.UNLIMITED)
@@ -65,6 +65,20 @@ class BleManager(private val ctx: Context, private val scope: CoroutineScope) {
         gatt?.close()
         // autoConnect=true: Android menyambung sendiri saat BF advertise lagi (BF bangun dari deep sleep).
         gatt = dev.connectGatt(ctx, true, cb, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    @Volatile private var retryGen = 0
+    /** Fresh GATT after 2 s; while still not connected, a direct attempt every 20 s, then rest on autoConnect. */
+    private suspend fun retryLoop(gen: Int) {
+        delay(2000)
+        var n = 0
+        while (wantConnected && gen == retryGen && _state.value != State.CONNECTED && n < 6) {
+            val addr = targetAddress ?: return
+            val dev = adapter?.getRemoteDevice(addr) ?: return
+            runCatching { gatt?.close() }
+            gatt = dev.connectGatt(ctx, n % 2 == 1, cb, BluetoothDevice.TRANSPORT_LE)
+            n++; delay(20_000)
+        }
     }
 
     // ---- Scan untuk pairing ----
@@ -94,6 +108,18 @@ class BleManager(private val ctx: Context, private val scope: CoroutineScope) {
         val d = CompletableDeferred<Boolean>(); ops.send(Op.W(uuid, data, d))
         return withTimeoutOrNull(8000) { d.await() } ?: false
     }
+    /** v0.3.9 hemat baterai BF: interval koneksi cepat hanya selama transfer firmware. */
+    fun setFastLink(fast: Boolean) {
+        runCatching { gatt?.requestConnectionPriority(if (fast) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) }
+    }
+    /** v0.3.9: tulis tanpa respons (data OTA). Selesai saat Android menerima paket ke antrian radio. */
+    suspend fun writeNoRsp(uuid: java.util.UUID, data: ByteArray): Boolean {
+        if (_state.value != State.READY) return false
+        val d = CompletableDeferred<Boolean>(); ops.send(Op.W(uuid, data, d, noRsp = true))
+        return withTimeoutOrNull(8000) { d.await() } ?: false
+    }
+    /** MTU hasil negosiasi (default BLE 23). Isi per paket = mtu - 3. */
+    @Volatile var mtu = 23; private set
     suspend fun read(uuid: java.util.UUID): ByteArray? {
         if (_state.value != State.READY) return null
         val d = CompletableDeferred<ByteArray?>(); ops.send(Op.R(uuid, d))
@@ -110,9 +136,9 @@ class BleManager(private val ctx: Context, private val scope: CoroutineScope) {
         val gate = CompletableDeferred<Any?>()
         pending = gate
         val started = when (op) {
-            is Op.W -> if (Build.VERSION.SDK_INT >= 33)
-                g.writeCharacteristic(c, op.data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
-            else { c.value = op.data; c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT; g.writeCharacteristic(c) }
+            is Op.W -> { val wt = if (op.noRsp) BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE else BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                if (Build.VERSION.SDK_INT >= 33) g.writeCharacteristic(c, op.data, wt) == BluetoothStatusCodes.SUCCESS
+                else { c.value = op.data; c.writeType = wt; g.writeCharacteristic(c) } }
             is Op.R -> g.readCharacteristic(c)
         }
         val result = if (started) withTimeoutOrNull(8000) { gate.await() } else null
@@ -131,18 +157,21 @@ class BleManager(private val ctx: Context, private val scope: CoroutineScope) {
                 g.requestMtu(BfProtocol.MTU)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 finishPending(null)
+                // v0.3.9.5: antrean GATT yang tertunda langsung gagal (tidak menumpuk saat terputus)
+                while (true) { val o = ops.tryReceive().getOrNull() ?: break; complete(o, null) }
                 _state.value = if (wantConnected) State.CONNECTING else State.OFF
                 onDisconnected?.invoke()
-                // autoConnect GATT tetap menunggu BF advertise; tidak perlu loop scan (hemat baterai HP).
+                // v0.3.9.6: after a BF restart the old GATT can hang in "Connecting...". Close it and try again.
+                if (wantConnected) { val gen = ++retryGen; scope.launch { retryLoop(gen) } }
             }
         }
-        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) { g.discoverServices() }
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) { if (status == BluetoothGatt.GATT_SUCCESS) this@BleManager.mtu = mtu; g.discoverServices() }
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             scope.launch {
                 subscribe(g, BfProtocol.EVENT); delay(300); subscribe(g, BfProtocol.FIND); delay(300)
                 _state.value = State.READY
                 refreshInfo()
-                runCatching { onReady?.invoke() }.onFailure { Log.w("BF", "sync gagal", it) }
+                runCatching { onReady?.invoke() }.onFailure { Log.w("BF", "sync failed", it) }
             }
         }
         @Deprecated("API < 33") override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {

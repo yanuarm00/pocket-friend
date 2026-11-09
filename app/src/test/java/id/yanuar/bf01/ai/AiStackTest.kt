@@ -76,7 +76,7 @@ class AiStackTest {
     @Test fun unpurchasedIsPlainError() {
         val e = httpFail("Qwen", 403, """{"code":"AccessDenied.Unpurchased","message":"Access to model denied."}""")
         assertEquals(AiFail.NOT_ACTIVATED, e.kind)
-        assertTrue(friendlyError(e).startsWith("Your Alibaba account hasn't activated this model yet"))
+        assertTrue(friendlyError(e).startsWith("This model isn't active on your Alibaba account"))
         assertEquals(AiFail.BAD_KEY, httpFail("Qwen", 403, "{}").kind)
     }
 
@@ -89,5 +89,16 @@ class AiStackTest {
         val p = prefs()
         p.qwenBaseUrl = Prefs.QWEN_BASE_CN; assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1", p.qwenBaseUrl)
         p.qwenBaseUrl = Prefs.QWEN_BASE_INTL; assertEquals("https://dashscope-intl.aliyuncs.com/compatible-mode/v1", p.qwenBaseUrl)
+    }
+
+    @Test fun grokSpeechIsAlwaysCloudNeverSystem() {
+        val p = prefs(); p.llmProvider = "grok"; p.sttProvider = "system"; p.xaiKey = ""
+        // hidden Grok falls back to Qwen; the stack must never name a system speech-to-text again
+        assertTrue(aiStack(p).stt != "system")
+    }
+
+    @Test fun errorLabelsNameTheModel() {
+        val p = prefs(); p.llmProvider = "qwen"; p.qwenModel = "qwen-plus"
+        assertEquals("Qwen · qwen-plus", chatLabel(p)); assertEquals("Qwen · ${p.qwenAsrModel}", sttLabel(p))
     }
 }

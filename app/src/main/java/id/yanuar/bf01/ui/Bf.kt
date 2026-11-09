@@ -171,7 +171,7 @@ fun DotPill(text: String, modifier: Modifier = Modifier, head: Boolean = true) {
 }
 
 /** Chat ala WhatsApp/daisyUI `chat-start`/`chat-end` (warna v1): BF kiri (gelembung putih, ekor kiri-bawah, avatar kepala BF),
- *  Mas Yan kanan (abu gelap, ekor kanan-bawah), header nama · jam. */
+ *  User (right) (abu gelap, ekor kanan-bawah), header nama · jam. */
 @Composable
 fun ChatBubble(text: String, fromBf: Boolean, header: String? = null) {
     val c = MaterialTheme.colorScheme; val b = LocalBubble.current

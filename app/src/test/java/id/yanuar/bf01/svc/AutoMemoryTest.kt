@@ -13,8 +13,8 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class AutoMemoryTest {
     @Test fun parsesFactsJson() {
-        val f = AutoMemory.parseFacts("```json\n{\"facts\":[\"Mas Yan suka kopi susu\",\"Rencana ke Bandung bulan depan\",\"x\",\"A\",\"Punya kucing bernama Oyen\",\"Fakta keempat\"]}\n```")
-        assertEquals(listOf("Mas Yan suka kopi susu", "Rencana ke Bandung bulan depan", "Punya kucing bernama Oyen"), f)
+        val f = AutoMemory.parseFacts("```json\n{\"facts\":[\"Alex suka kopi susu\",\"Rencana ke Bandung bulan depan\",\"x\",\"A\",\"Punya kucing bernama Oyen\",\"Fakta keempat\"]}\n```")
+        assertEquals(listOf("Alex suka kopi susu", "Rencana ke Bandung bulan depan", "Punya kucing bernama Oyen"), f)
         assertTrue(AutoMemory.parseFacts("{\"facts\":[]}").isEmpty())
         assertTrue(AutoMemory.parseFacts("maaf tidak ada").isEmpty())
         assertEquals(1, AutoMemory.parseFacts("[\"Suka nasi goreng pedas\"]").size)
@@ -25,14 +25,14 @@ class AutoMemoryTest {
         assertTrue(AutoMemory.isSensitive("Password email: hunter2"))
         assertTrue(AutoMemory.isSensitive("Nomor kartu 4111 1111 1111 1111"))
         assertTrue(AutoMemory.isSensitive("PIN ATM 123456"))
-        assertFalse(AutoMemory.isSensitive("Mas Yan suka kopi susu gula aren"))
+        assertFalse(AutoMemory.isSensitive("Alex suka kopi susu gula aren"))
         assertFalse(AutoMemory.isSensitive("Rencana cetak 50 unit casing tahun 2027"))
         assertFalse(AutoMemory.isSensitive("Pindah kantor ke Depok bulan Desember"))
     }
     @Test fun nearDuplicates() {
-        assertTrue(AutoMemory.similar("Mas Yan suka kopi susu gula aren", "Suka kopi susu gula aren"))
-        assertTrue(AutoMemory.similar("Sedang membuat perangkat BF-01", "Mas Yan sedang membuat perangkat BF-01."))
-        assertFalse(AutoMemory.similar("Mas Yan suka kopi susu gula aren", "Mas Yan suka teh tarik"))
+        assertTrue(AutoMemory.similar("Alex suka kopi susu gula aren", "Suka kopi susu gula aren"))
+        assertTrue(AutoMemory.similar("Sedang membuat perangkat BF-01", "Alex sedang membuat perangkat BF-01."))
+        assertFalse(AutoMemory.similar("Alex suka kopi susu gula aren", "Alex suka teh tarik"))
         assertFalse(AutoMemory.similar("Lari pagi tiap Sabtu", "Rencana cetak 50 unit casing"))
     }
     @Test fun capDropsOldestAutoOnly() {

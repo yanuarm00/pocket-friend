@@ -16,7 +16,7 @@ object CalendarSource {
         ctx.contentResolver.query(uri, arrayOf(CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN,
             CalendarContract.Instances.END, CalendarContract.Instances.EVENT_LOCATION, CalendarContract.Instances.ALL_DAY),
             null, null, CalendarContract.Instances.BEGIN)?.use { c ->
-            buildList { while (c.moveToNext()) if (c.getInt(4) == 0) add(Ev(c.getString(0) ?: "(tanpa judul)", c.getLong(1), c.getLong(2), c.getString(3) ?: "")) }
+            buildList { while (c.moveToNext()) if (c.getInt(4) == 0) add(Ev(c.getString(0) ?: "(no title)", c.getLong(1), c.getLong(2), c.getString(3) ?: "")) }
         } ?: emptyList()
     }.getOrDefault(emptyList())
 

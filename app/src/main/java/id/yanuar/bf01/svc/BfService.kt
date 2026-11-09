@@ -33,6 +33,7 @@ class BfService : Service() {
         if (intent?.action == ACTION_OFF) { hub.disconnectAll(); return START_NOT_STICKY }
         if (!hub.prefs.linkEnabled) { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE); stopSelf(); return START_NOT_STICKY }
         hub.start()
+        UpdateCheckWorker.schedule(this)
         return START_STICKY
     }
 

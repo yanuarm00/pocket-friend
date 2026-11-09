@@ -50,8 +50,22 @@ class BfProtocolTest {
         assertEquals(80, i.batt); assertTrue(i.warm)
     }
     @Test fun nameCardJson() {
-        val j = JSONObject(String(BfProtocol.nameCard("https://wa.me/1", "YANUAR", "CD")))
-        assertEquals("https://wa.me/1", j.getString("qr")); assertEquals("YANUAR", j.getString("name"))
+        val w = BfProtocol.nameCardWrites(listOf(BfProtocol.BfProfile("wa", "Alex", "https://wa.me/1")), "https://wa.me/1", "Alex", "CD")
+        assertEquals(1, w.size)
+        val j = JSONObject(String(w[0]))
+        assertEquals(2, j.getInt("v")); assertEquals(0, j.getInt("off"))
+        assertEquals("https://wa.me/1", j.getString("qr")); assertEquals("Alex", j.getString("name"))
+        assertEquals("wa", j.getJSONArray("profiles").getJSONObject(0).getString("t"))
+    }
+    @Test fun nameCardChunks() {
+        val l = List(6) { BfProtocol.BfProfile("li", "Person $it", "https://www.linkedin.com/in/" + "x".repeat(90) + it) }
+        val w = BfProtocol.nameCardWrites(l, l[0].url, "N", "T")
+        assertTrue(w.size > 1); w.forEach { assertTrue(it.size <= BfProtocol.NAMECARD_CHUNK + 0) }
+        var n = 0
+        w.forEachIndexed { i, b -> val j = JSONObject(String(b)); assertEquals(n, j.getInt("off")); assertEquals(i == 0, j.has("qr")); n += j.getJSONArray("profiles").length() }
+        assertEquals(6, n)
+        // a normal list fits one write
+        assertEquals(1, BfProtocol.nameCardWrites(List(4) { BfProtocol.BfProfile("ig", "Instagram", "https://instagram.com/alex") }, "", "", "").size)
     }
 
     @Test fun otaEvents() {

@@ -17,7 +17,7 @@ object QwenUrl {
         var s = raw?.trim()?.replace(" ", "") ?: return null
         if (s.isEmpty()) return null
         if (!s.contains("://")) s = "https://$s"
-        if (!s.startsWith("https://", true) && !s.startsWith("http://", true)) return null
+        if (!s.startsWith("https://", true)) return null  // 0.3.9.8.8: https only (the API key must never go out unencrypted)
         val schemeEnd = s.indexOf("://") + 3
         val slash = s.indexOf('/', schemeEnd).let { if (it < 0) s.length else it }
         val host = s.substring(schemeEnd, slash).lowercase().trimEnd('.')

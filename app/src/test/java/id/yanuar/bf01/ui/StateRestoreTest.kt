@@ -32,19 +32,18 @@ class StateRestoreTest {
 
     @Test fun setelanSubPageKeepsTypedTextAfterBack() {
         rule.setContent { PocketFriendTheme(true) { App(hub(), Screen.Pengaturan) } }
-        rule.onNodeWithText("Connection & network").performClick()
+        rule.onNodeWithText("Connection").performClick()
         rule.onNodeWithText("Phone IP as seen by BF").performScrollTo().performTextReplacement("10.0.0.9")
         back()
-        rule.onNodeWithText("Device").performClick()
-        rule.onNodeWithText("Recordings").performClick()
-        rule.onNodeWithText("Sync recordings").assertExists()
-        back(); back()
-        rule.onNodeWithText("Connection & network").performClick()
+        rule.onNodeWithText("Privacy & data").performScrollTo().performClick()
+        rule.onNodeWithText("Not synced yet").assertExists()  // v0.4.0: quiet sync line, no Sync button
+        back()
+        rule.onNodeWithText("Connection").performScrollTo().performClick()
         // Isian yang belum disimpan dan posisi scroll tetap ada (judul bagian atas sudah tergulir).
         rule.onNodeWithText("10.0.0.9").assertExists()
         rule.onNodeWithText("10.0.0.9").assertIsDisplayed()
-        back(); back()
-        rule.onNodeWithText("Sync").assertExists()
+        back()
+        rule.onNodeWithText("Settings").assertExists()
     }
 
     @Test fun tabSwitchKeepsState() {
@@ -52,8 +51,8 @@ class StateRestoreTest {
         rule.onNodeWithText("Ask BF…").performTextInput("halo BF")
         rule.onNodeWithText("BF persona & memory").performClick()
         rule.onNodeWithText("Persona", ignoreCase = true).assertExists()
-        rule.onNodeWithText("To-do").performClick()
-        rule.onNodeWithText("Ask AI").performClick()
+        rule.onNodeWithContentDescription("To-do").performClick()
+        rule.onNodeWithContentDescription("Ask").performClick()
         rule.onNodeWithText("halo BF").assertExists()
         rule.onNodeWithText("Persona", ignoreCase = true).assertExists()
         rule.onAllNodesWithText("Hide", substring = true).assertCountEquals(0)
@@ -61,10 +60,10 @@ class StateRestoreTest {
 
     @Test fun backFromTabGoesToBerandaThenExitAllowed() {
         rule.setContent { PocketFriendTheme(true) { App(hub(), Screen.Beranda) } }
-        rule.onNodeWithText("Notes").performClick()
+        rule.onNodeWithContentDescription("Notes").performClick()
         rule.onNodeWithText("Search notes").assertExists()
         back()
-        rule.onNodeWithText("Sync").assertExists()
+        rule.onNodeWithText("Today").assertExists()
     }
 
     @Test fun swipeDeleteTaskWithUndo() {

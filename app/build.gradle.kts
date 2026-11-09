@@ -16,8 +16,8 @@ android {
         applicationId = "id.yanuarmoo.pocketfriend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.3.8"
+        versionCode = 47
+        versionName = "0.4.8"
     }
     // Signing rilis: dibaca dari env (PF_KEYSTORE, PF_KEYSTORE_PASSWORD, PF_KEY_ALIAS, PF_KEY_PASSWORD)
     // atau dari local.properties (pf.keystore, pf.keystorePassword, pf.keyAlias, pf.keyPassword). Rahasia TIDAK di repo.
@@ -45,7 +45,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    testOptions { unitTests { isIncludeAndroidResources = true; all { it.systemProperty("roborazzi.test.record", "true"); it.systemProperty("robolectric.pixelCopyRenderMode", "hardware"); it.maxHeapSize = "3g"; it.forkEvery = 1 } } }
+    testOptions { unitTests { isIncludeAndroidResources = true; all {
+        // Screenshots go under app/build/roborazzi (never the repo tree). Record only when -Proborazzi.record is set.
+        it.systemProperty("roborazzi.test.record", if (project.hasProperty("roborazzi.record")) "true" else "false")
+        it.systemProperty("roborazzi.output.dir", layout.buildDirectory.dir("roborazzi").get().asFile.absolutePath)
+        it.systemProperty("robolectric.pixelCopyRenderMode", "software"); it.maxHeapSize = "3g"; it.forkEvery = 1
+    } } }
     packaging { resources { excludes += setOf("META-INF/INDEX.LIST", "META-INF/io.netty.versions.properties", "META-INF/DEPENDENCIES") } }
 }
 
@@ -56,6 +61,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.activity:activity-compose:1.10.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("androidx.navigation:navigation-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-service:2.8.7")
