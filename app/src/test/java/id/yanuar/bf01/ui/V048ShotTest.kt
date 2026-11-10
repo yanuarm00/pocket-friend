@@ -30,7 +30,7 @@ class V048ShotTest {
 
     private val home = HomeState(
         "Afternoon, Alex", "Small steps still count.", "Bobo",
-        online = true, connecting = false, battery = "82% · charging", network = "Hotspot · Alex's phone",
+        online = true, connecting = false, battery = "82% · charging", lastSeen = "Last seen · 5 min ago", network = "Hotspot · Alex's phone",
         date = "Wed, 4 Nov", weather = "31° · Sunny", tasks = 3, reminders = 1, next = "Call design · 14:00",
         whereLine = "Last seen · Office", hasLocation = true,
         recentTitle = "Project plan", recentSub = "Voice note · 4:32", recentNew = true,

@@ -272,38 +272,65 @@ data class TodoRowUi(val id: Long, val title: String, val sub: String, val done:
     }
 
 /* ---------------- Ask BF ---------------- */
-@Composable fun AskHeader(aiName: String, persona: String, onHistory: () -> Unit, onPersona: () -> Unit) =
+/** Short persona chip label — never mid-word truncate. */
+fun shortPersonaChip(raw: String, fallback: String = "Calm buddy"): String {
+    val line = raw.lineSequence().firstOrNull()?.trim().orEmpty()
+    if (line.isBlank()) return fallback
+    // Prefer a known short vibe label if the saved persona is a long system prompt.
+    if (line.length > 22 || line.startsWith("You are", true) || line.startsWith("Kamu ", true)) return fallback
+    if (line.length <= 16) return line
+    val cut = line.take(16)
+    val at = cut.lastIndexOf(' ')
+    return if (at >= 6) cut.substring(0, at) else fallback
+}
+
+@Composable fun AskHeader(aiName: String, persona: String, onHistory: () -> Unit, onPersona: () -> Unit) {
+    val chip = shortPersonaChip(persona)
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Pop.Ink), contentAlignment = Alignment.Center) {
             Text("bf", color = Color.White, fontWeight = FontWeight.Bold)
-            Box(Modifier.align(Alignment.BottomEnd).padding(4.dp).size(7.dp).clip(CircleShape).background(Pop.Orange)) }
+            Box(Modifier.align(Alignment.BottomEnd).padding(4.dp).size(7.dp).clip(CircleShape).background(Pop.Orange))
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("Ask $aiName", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-            Text("Searches your notes first · on phone", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Ask $aiName", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Searches your notes first · on phone", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
         }
-        Box(Modifier.size(40.dp).clip(CircleShape).background(cardColor()).clickable(onClick = onHistory), contentAlignment = Alignment.Center) {
-            Icon(Sym.RestartAlt, "Chat history", Modifier.size(18.dp)) }
         Spacer(Modifier.width(8.dp))
-        Row(Modifier.clip(CircleShape).background(Color(0xFFFFE3D2)).clickable(onClick = onPersona).padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Sym.AutoAwesome, null, Modifier.size(14.dp), tint = Pop.OrangeDeep); Spacer(Modifier.width(4.dp))
-            Text(persona, style = MaterialTheme.typography.labelLarge, color = Pop.OrangeDeep, maxLines = 1) }
+        Box(Modifier.size(40.dp).clip(CircleShape).background(cardColor()).clickable(onClick = onHistory), contentAlignment = Alignment.Center) {
+            Icon(Sym.RestartAlt, "Chat history", Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Row(
+            Modifier.clip(CircleShape).background(Color(0xFFFFE3D2)).clickable(onClick = onPersona)
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Sym.AutoAwesome, null, Modifier.size(14.dp), tint = Pop.OrangeDeep)
+            Spacer(Modifier.width(4.dp))
+            Text(chip, style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold), color = Pop.OrangeDeep, maxLines = 1)
+        }
     }
+}
 
 @Composable fun RemembersCard(aiName: String, items: List<String>, open: Boolean, onToggle: () -> Unit, onEdit: () -> Unit) =
-    Surface(shape = Card22, color = cardColor(), shadowElevation = 1.dp) {
-        Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            Row(Modifier.clickable(onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Sym.Notes, null, Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
+    Surface(shape = Card22, color = cardColor(), shadowElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp)) {
+            Row(Modifier.fillMaxWidth().clickable(onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Sym.Neurology, null, Modifier.size(20.dp), tint = Pop.OrangeDeep); Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("$aiName remembers", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                    Text("${items.size} things · used to answer better", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("$aiName remembers", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${items.size} things · used to answer better", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Text("Edit", Modifier.clickable(onClick = onEdit).padding(6.dp), color = Pop.Orange, fontWeight = FontWeight.Bold)
+                Text("Edit", Modifier.clickable(onClick = onEdit).padding(horizontal = 8.dp, vertical = 6.dp), color = Pop.Orange, fontWeight = FontWeight.Bold)
                 Icon(Sym.ExpandMore, null)
             }
-            if (open && items.isNotEmpty()) Text(items.joinToString(" · "), Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(10.dp), style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            if (open && items.isNotEmpty()) Text(
+                items.joinToString(" · "),
+                Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(12.dp),
+                style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 

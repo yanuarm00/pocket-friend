@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,7 +72,7 @@ fun agoLabel(ms: Long, now: Long = System.currentTimeMillis()): String {
 /** Everything Home shows, so tests can render it without a live Hub. */
 data class HomeState(
     val greeting: String, val quote: String, val deviceName: String, val online: Boolean, val connecting: Boolean,
-    val battery: String, val network: String, val date: String, val weather: String?,
+    val battery: String, val lastSeen: String, val network: String, val date: String, val weather: String?,
     val tasks: Int, val reminders: Int, val next: String?,
     val whereLine: String, val hasLocation: Boolean,
     val recentTitle: String?, val recentSub: String?, val recentNew: Boolean,
@@ -101,7 +102,16 @@ private val fDate = SimpleDateFormat("EEE, d MMM", Locale.US); private val fHm =
     return HomeState(
         greeting = HomeQuotes.bucket(hour) + if (owner.isNotBlank()) ", $owner" else "", quote = quote, deviceName = name,
         online = ready, connecting = (st == BleManager.State.CONNECTING || st == BleManager.State.CONNECTED || st == BleManager.State.SCANNING),
-        battery = when { batt == null -> "Battery unknown"; ready && info?.usb == true -> "Charging · $batt%"; ready -> "Battery $batt%"; else -> "$batt%" },
+        battery = when {
+            batt == null -> "Battery unknown"
+            ready && info?.usb == true -> "Charging · $batt%"
+            else -> "Battery $batt%"
+        },
+        lastSeen = when {
+            ready -> "Just now"
+            p.lastLocTime > 0 -> "Last seen · ${agoLabel(p.lastLocTime, now)}"
+            else -> "Last seen · a while ago"
+        },
         network = if (wifi) (p.wifi(1).first.takeIf { it.isNotBlank() }?.let { "Hotspot · $it" } ?: p.wifi(0).first.ifBlank { "Wi-Fi" }.let { "Wi-Fi · $it" }) else "Bluetooth · Wi-Fi off",
         date = fDate.format(Date(now)), weather = weather,
         tasks = tasks.size - reminders.size, reminders = reminders.size, next = next?.let { "${it.title} · ${fHm.format(Date(it.due))}" },
@@ -122,6 +132,7 @@ private val fDate = SimpleDateFormat("EEE, d MMM", Locale.US); private val fHm =
                 .onFailure { runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)) } } },
             maps = { if (!p.lastLat.isNaN()) { hub.db.addFeatureUse(id.yanuar.bf01.svc.Feature.WHERES_MINE); openMaps(ctx, p.lastLat, p.lastLon) } })
         if (hub.findPhone.ringing) Button({ hub.findPhone.stop() }, Modifier.fillMaxWidth().padding(top = 12.dp)) { Text("Stop phone ringing") }
+        Spacer(Modifier.height(PopNavClearance))
     }
 }
 
@@ -186,27 +197,28 @@ private fun Color.luminanceLow() = (red * 0.3f + green * 0.59f + blue * 0.11f) <
     val fg = if (s.online) Color.White else cs.onSurface
     val sub = if (s.online) Color.White else cs.onSurfaceVariant
     // Same height online and offline, so Home doesn't jump when the device drops.
-    Surface(Modifier.fillMaxWidth().height(196.dp), shape = RoundedCornerShape(28.dp), color = bg, contentColor = fg) {
+    Surface(Modifier.fillMaxWidth().height(210.dp), shape = RoundedCornerShape(28.dp), color = bg, contentColor = fg) {
         Box(Modifier.fillMaxSize()) {
             FloatingDevice(if (s.online) DeviceArt.Pose.Happy else DeviceArt.Pose.Offline, 132.dp, Modifier.align(Alignment.CenterEnd).padding(end = 8.dp), animate)
-            Column(Modifier.fillMaxHeight().padding(start = 20.dp, top = 18.dp, bottom = 16.dp, end = 140.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (s.online) Row(verticalAlignment = Alignment.Bottom) {
+            Column(Modifier.fillMaxHeight().padding(start = 20.dp, top = 16.dp, bottom = 14.dp, end = 140.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                // Same header online + offline: name + BF-01 (never "X is offline").
+                Row(verticalAlignment = Alignment.Bottom) {
                     Text(s.deviceName, style = MaterialTheme.typography.headlineMedium, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, false))
                     Spacer(Modifier.width(8.dp)); Text("BF-01", style = MaterialTheme.typography.labelLarge, color = sub.copy(alpha = 0.85f), modifier = Modifier.padding(bottom = 5.dp))
-                } else Text("${s.deviceName} is offline", style = MaterialTheme.typography.titleLarge, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 if (s.online) {
                     Box(Modifier.clickable(onClickLabel = "Battery usage", onClick = battery)) { InfoLine(Sym.Bolt, s.battery, sub) }; InfoLine(Sym.Wifi, s.network, sub)
                     Spacer(Modifier.weight(1f))
                     Text(s.date + (s.weather?.let { "  ·  $it" } ?: ""), style = MaterialTheme.typography.labelLarge, color = sub)
                 } else {
-                    InfoLine(Sym.WifiOff, "Last seen · ${s.battery}", sub)
-                    Spacer(Modifier.height(2.dp))
+                    InfoLine(Sym.WifiOff, s.lastSeen, sub)
+                    Box(Modifier.clickable(onClickLabel = "Battery usage", onClick = battery)) { InfoLine(Sym.Bolt, s.battery, sub) }
+                    Spacer(Modifier.weight(1f))
+                    // Side-by-side single-line pills (same card height as online; never mid-word wrap).
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Pill("Reconnect", AppTheme.accentColor(), Color.White, reconnect)
                         Pill("Hotspot", Color.Transparent, fg, hotspot, outline = true)
                     }
-                    Spacer(Modifier.weight(1f))
-                    Text("Can't find ${s.deviceName}? ›", style = MaterialTheme.typography.labelLarge, color = sub, modifier = Modifier.clickable(onClick = maps))
                 }
             }
         }
@@ -218,9 +230,17 @@ private fun Color.luminanceLow() = (red * 0.3f + green * 0.59f + blue * 0.11f) <
     Text(text, style = MaterialTheme.typography.labelLarge, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
-@Composable private fun Pill(text: String, bg: Color, fg: Color, onClick: () -> Unit, outline: Boolean = false) =
-    Text(text, Modifier.clip(CircleShape).background(bg).then(if (outline) Modifier.border(1.dp, fg.copy(alpha = 0.3f), CircleShape) else Modifier)
-        .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge, color = fg)
+@Composable private fun Pill(text: String, bg: Color, fg: Color, onClick: () -> Unit, outline: Boolean = false, fill: Boolean = false) =
+    Text(
+        text,
+        Modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier)
+            .clip(CircleShape).background(bg)
+            .then(if (outline) Modifier.border(1.5.dp, fg.copy(alpha = 0.45f), CircleShape) else Modifier)
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold), color = fg,
+        maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
+        textAlign = if (fill) TextAlign.Center else TextAlign.Start,
+    )
 
 @Composable private fun Tile(m: Modifier, bg: Color, fg: Color, icon: ImageVector, title: String, sub: String, foot: String, footIcon: ImageVector, onClick: () -> Unit) =
     Surface(m.clickable(onClick = onClick), shape = RoundedCornerShape(24.dp), color = bg, contentColor = fg) {

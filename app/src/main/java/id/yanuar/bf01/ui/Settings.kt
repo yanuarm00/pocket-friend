@@ -24,9 +24,17 @@ data class SetRow(val icon: ImageVector, val title: String, val sub: String?, va
                   val chip: String? = null, val chipYellow: Boolean = false, val accent: Color? = null, val deviceThumb: Boolean = false,
                   val swatches: Boolean = false, val onChip: (() -> Unit)? = null)
 
-@Composable fun SettingsContent(profileName: String, profileSub: String, onProfile: () -> Unit, device: List<SetRow>, app: List<SetRow>) {
+@Composable fun SettingsContent(
+    profileName: String, profileSub: String, onProfile: () -> Unit,
+    device: List<SetRow>, app: List<SetRow>,
+    online: Boolean = false, connecting: Boolean = false, onStatus: () -> Unit = {},
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Settings", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(bottom = 4.dp))
+        // Single page title + LED (no scaffold TopAppBar title on Settings).
+        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Settings", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+            LedChip(online, connecting, onStatus)
+        }
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Pop.Ink).clickable(onClick = onProfile).padding(14.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(52.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {

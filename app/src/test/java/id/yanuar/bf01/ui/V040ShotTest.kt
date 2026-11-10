@@ -20,7 +20,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], qualifiers = "w411dp-h1000dp-420dpi")
 class V040ShotTest {
     private val home = HomeState("Good morning, Alex", "Small steps still count.", "Pip", online = true, connecting = false,
-        battery = "Battery 82%", network = "Wi-Fi · Home 5", date = "Tue, 3 Nov", weather = "29° · Partly cloudy",
+        battery = "Battery 82%", lastSeen = "Last seen · 5 min ago", network = "Wi-Fi · Home 5", date = "Tue, 3 Nov", weather = "29° · Partly cloudy",
         tasks = 4, reminders = 2, next = "15:00 · Call the dentist", whereLine = "Last seen at home · 5 min ago", hasLocation = true,
         recentTitle = "Weekend plan", recentSub = "2 min ago · 0:48", recentNew = true,
         asked = "What time is the market open on Sunday?", reminderRang = "Water the plants · 08:00")

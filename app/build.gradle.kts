@@ -16,8 +16,8 @@ android {
         applicationId = "id.yanuarmoo.pocketfriend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 47
-        versionName = "0.4.8"
+        versionCode = 49
+        versionName = "0.4.10"
     }
     // Signing rilis: dibaca dari env (PF_KEYSTORE, PF_KEYSTORE_PASSWORD, PF_KEY_ALIAS, PF_KEY_PASSWORD)
     // atau dari local.properties (pf.keystore, pf.keystorePassword, pf.keyAlias, pf.keyPassword). Rahasia TIDAK di repo.
@@ -74,6 +74,9 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0") { isTransitive = false }
     implementation("io.github.jaredmdobson:concentus:1.0.2")
+    // Frosted glass (Haze 1.5 — works with Compose BOM 2025.02 / compileSdk 36)
+    implementation("dev.chrisbanes.haze:haze:1.5.4")
+    implementation("dev.chrisbanes.haze:haze-materials:1.5.4")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")

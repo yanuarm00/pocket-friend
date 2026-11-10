@@ -135,7 +135,7 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
                     player = runCatching { android.media.MediaPlayer().apply { setDataSource(n.localPath); setOnCompletionListener { it.release(); player = null; playing = null }; prepare(); start() } }.getOrNull()
                     if (player == null) playing = null } },
             onShowHow = { how = true }, syncLine = { SyncStatusLine(hub) }, onOpenSearch = { hub.openScreen?.invoke(Screen.Search) })
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(PopNavClearance))
     }
     if (how) AlertDialog({ how = false }, title = { Text("Save a note") }, text = { Text("Hold the top button on $dev, speak, then let go and pick NOTE. It shows up here with a transcript once $dev syncs.") },
         confirmButton = { TextButton({ how = false }) { Text("Got it") } })
@@ -238,8 +238,9 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
                     Text(if (sentAt.isNotEmpty()) "last $sentAt" else if (online) "On $devName" else "Waiting for $devName", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                 }
             }
+            Spacer(Modifier.height(PopNavClearance))
         }
-        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter))
+        SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = PopNavClearance))
     }
 }
 
@@ -285,7 +286,7 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
     val empty = chat?.isEmpty() == true && !busy && pending.isEmpty()
     Column(Modifier.fillMaxSize()) {
         var memOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
-        AskHeader(ai, persona.lineSequence().firstOrNull()?.take(14)?.ifBlank { null } ?: "Calm buddy", { hub.openScreen?.invoke(Screen.AiChats) }) { more = !more }
+        AskHeader(ai, persona, { hub.openScreen?.invoke(Screen.AiChats) }) { more = !more }
         Spacer(Modifier.height(10.dp))
         RemembersCard(ai, mems?.map { it.text } ?: emptyList(), memOpen, { memOpen = !memOpen }) { more = !more }
         Spacer(Modifier.height(6.dp))
@@ -339,6 +340,7 @@ private val saran = listOf(R.string.ask_s1, R.string.ask_s2, R.string.ask_s3)
         }
         Spacer(Modifier.height(12.dp))
         AskInput(msg, { msg = it }, "Ask anything…", { send(msg) })
+        Spacer(Modifier.height(PopNavClearance))
     }
     if (confirmClear) AlertDialog({ confirmClear = false }, icon = { Icon(Sym.DeleteSweep, null) }, title = { Text(stringResource(R.string.ask_clear_q)) },
         text = { Text(stringResource(R.string.ask_clear_note, ai)) },
@@ -498,7 +500,7 @@ fun notifAccessGranted(ctx: android.content.Context): Boolean =
 }
 
 /** Beranda Setelan: kartu WHERE'S MINE + 6 kategori berikon (sub-halaman). */
-@Composable fun PengaturanScreen(hub: Hub, open: (Screen) -> Unit = {}) {
+@Composable fun PengaturanScreen(hub: Hub, open: (Screen) -> Unit = {}, onStatus: () -> Unit = {}) {
     val p = hub.prefs; val ctx = LocalContext.current
     val linked by hub.linked.collectAsState(); val st by hub.ble.state.collectAsState(); val info by hub.ble.info.collectAsState()
     val fails by hub.reconnectFails.collectAsState(); val remoteFw by hub.fwUpdate.remote.collectAsState()
@@ -539,7 +541,11 @@ fun notifAccessGranted(ctx: android.content.Context): Boolean =
                 SetRow(Sym.BarChart, "Usage", "Features, battery & AI cost", { open(Screen.Usage) }),
                 SetRow(Sym.Palette, "Theme", null, { open(Screen.ThemeBoard) }, swatches = true),
                 SetRow(Sym.Shield, "Privacy & data", "Export, clear, audio & chats", { open(Screen.Privacy) }),
-            ))
+            ),
+            online = ready,
+            connecting = st == id.yanuar.bf01.ble.BleManager.State.CONNECTING || st == id.yanuar.bf01.ble.BleManager.State.SCANNING,
+            onStatus = onStatus,
+        )
         if (!neverPaired && (fails >= 2 || help)) ConnectHelpCard(hub)
         if (!neverPaired && !ready) ActionButton("Reconnect", primary = true, icon = Sym.Refresh) { hub.reconnect() }
         AppUpdateCard(always = true)
@@ -578,6 +584,7 @@ fun notifAccessGranted(ctx: android.content.Context): Boolean =
         }
         NotifAccessCard()
         VersionFooter()
+        Spacer(Modifier.height(PopNavClearance))
     }
 }
 

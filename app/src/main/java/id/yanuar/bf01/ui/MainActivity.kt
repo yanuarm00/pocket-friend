@@ -1,5 +1,10 @@
 package id.yanuar.bf01.ui
 
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalView
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
+
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
@@ -116,9 +121,12 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
     var sheet by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(sheetOpen) }
     androidx.activity.compose.BackHandler(enabled = sheet) { sheet = false }
     val status = rememberBfStatus(hub)
+    val hazeState = remember { HazeState() }
+    // Haze needs a hardware canvas (RenderNode). Robolectric / software surfaces fall back to translucent glass only.
+    val hazeOk = LocalView.current.isHardwareAccelerated
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        topBar = { if (screen !in setOf(Screen.Beranda, Screen.Catatan, Screen.Tugas, Screen.Ngobrol, Screen.AiChats, Screen.Search, Screen.Onboard, Screen.Kartu, Screen.SetFirmware))
+        topBar = { if (screen !in setOf(Screen.Beranda, Screen.Catatan, Screen.Tugas, Screen.Ngobrol, Screen.Pengaturan, Screen.AiChats, Screen.Search, Screen.Onboard, Screen.Kartu, Screen.SetFirmware))
             TopAppBar(title = {
                 if (isTab) Column {  // v0.4.1: v5.13 header (big title + one-line subtitle) instead of the old dot-matrix bar
                     if (screen != Screen.Pengaturan) Text(stringResource(screen.title), style = MaterialTheme.typography.headlineMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
@@ -127,12 +135,21 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
                 }
                 else Text(stringResource(screen.title), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }, navigationIcon = { if (!isTab) IconButton({ nav.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
-                actions = { StatusPill(status, compact = !isTab) { sheet = true }; Spacer(Modifier.width(12.dp)) },
+                // v0.4.9: LED dot like Home (never the bold "BF OFF" pill)
+                actions = {
+                    LedChip(status == BfStatus.On, status == BfStatus.Menyambung) { sheet = true }
+                    Spacer(Modifier.width(12.dp))
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
         },
-        bottomBar = { PopNavBar(screen, isTab) { nav.tab(it) } },
+        // Nav floats over content (drawn below); no solid reserved bar.
+        bottomBar = {},
 ) { pad ->
-        Box(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 14.dp)) {
+        // No bottom PopNavClearance here — content must scroll UNDER the frosted nav.
+        // Scrollable screens add Spacer(PopNavClearance) / contentPadding themselves.
+        Box(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize()
+            .padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 14.dp)
+            .then(if (hazeOk) Modifier.hazeSource(state = hazeState) else Modifier)) {
             holder.SaveableStateProvider(screen.name) { when (screen) {
                 Screen.Beranda -> BerandaScreen(hub, go = { if (tabs.any { t -> t.first == it }) nav.tab(it) else nav.open(it) }, onStatus = { sheet = true })
                 Screen.Pairing -> PairingScreen(hub) { if (!nav.back()) nav.tab(Screen.Beranda) }
@@ -142,7 +159,7 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
                 Screen.Kartu -> ProfilesScreen(hub)
                 Screen.Menu -> MenuScreen(hub)
                 Screen.File -> FileScreen(hub)
-                Screen.Pengaturan -> PengaturanScreen(hub) { nav.open(it) }
+                Screen.Pengaturan -> PengaturanScreen(hub, open = { nav.open(it) }, onStatus = { sheet = true })
                 Screen.SetAi -> SetAiScreen(hub)
                 Screen.SetSuara -> SetSuaraScreen(hub)
                 Screen.SetJaringan -> SetJaringanScreen(hub)
@@ -162,6 +179,10 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
         }
     }
     StatusSheet(hub, status, sheet) { sheet = false }
+    // Floating frosted nav — content above scrolls under it.
+    Box(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).fillMaxWidth()) {
+        PopNavBar(screen, isTab, hazeState = hazeState.takeIf { hazeOk }) { nav.tab(it) }
+    }
     }
 }
 

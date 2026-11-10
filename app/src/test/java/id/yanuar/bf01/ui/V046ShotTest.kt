@@ -49,7 +49,7 @@ class V046ShotTest {
         shot("home_orange.png") {
             HomeContent(
                 HomeState("Afternoon, Alex", "Small steps still count.", "Bobo", true, false,
-                    "82% · charging", "Hotspot · Alex's phone", "Wed, 4 Nov", "31° · Sunny",
+                    "82% · charging", "Last seen · 5 min ago", "Hotspot · Alex's phone", "Wed, 4 Nov", "31° · Sunny",
                     3, 1, "Call design · 14:00", "Last seen · Office", true,
                     "Project plan", "Voice note · 4:32", true, null, null),
                 animate = false,
@@ -62,7 +62,7 @@ class V046ShotTest {
         shot("home_blue.png") {
             HomeContent(
                 HomeState("Afternoon, Alex", "Small steps still count.", "Bobo", true, false,
-                    "82% · charging", "Hotspot · Alex's phone", "Wed, 4 Nov", "31° · Sunny",
+                    "82% · charging", "Last seen · 5 min ago", "Hotspot · Alex's phone", "Wed, 4 Nov", "31° · Sunny",
                     3, 1, "Call design · 14:00", "Last seen · Office", true,
                     "Project plan", "Voice note · 4:32", true, null, null),
                 animate = false,
