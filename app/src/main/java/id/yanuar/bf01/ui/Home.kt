@@ -69,6 +69,18 @@ fun agoLabel(ms: Long, now: Long = System.currentTimeMillis()): String {
     return when { m < 1 -> "just now"; m < 60 -> "$m min ago"; m < 24 * 60 -> "${m / 60} h ago"; m < 48 * 60 -> "yesterday"; else -> "${m / (24 * 60)} days ago" }
 }
 
+/** Compact last-seen for the offline Home card (fits next to the device art). */
+fun shortAgo(ms: Long, now: Long = System.currentTimeMillis()): String {
+    val m = ((now - ms) / 60_000).coerceAtLeast(0)
+    return when {
+        m < 1 -> "just now"
+        m < 60 -> "${m}m ago"
+        m < 24 * 60 -> "${m / 60}h ago"
+        m < 48 * 60 -> "yesterday"
+        else -> "${m / (24 * 60)}d ago"
+    }
+}
+
 /** Everything Home shows, so tests can render it without a live Hub. */
 data class HomeState(
     val greeting: String, val quote: String, val deviceName: String, val online: Boolean, val connecting: Boolean,
@@ -109,8 +121,8 @@ private val fDate = SimpleDateFormat("EEE, d MMM", Locale.US); private val fHm =
         },
         lastSeen = when {
             ready -> "Just now"
-            p.lastLocTime > 0 -> "Last seen · ${agoLabel(p.lastLocTime, now)}"
-            else -> "Last seen · a while ago"
+            p.lastLocTime > 0 -> "Seen ${shortAgo(p.lastLocTime, now)}"
+            else -> "Seen a while ago"
         },
         network = if (wifi) (p.wifi(1).first.takeIf { it.isNotBlank() }?.let { "Hotspot · $it" } ?: p.wifi(0).first.ifBlank { "Wi-Fi" }.let { "Wi-Fi · $it" }) else "Bluetooth · Wi-Fi off",
         date = fDate.format(Date(now)), weather = weather,
@@ -215,9 +227,9 @@ private fun Color.luminanceLow() = (red * 0.3f + green * 0.59f + blue * 0.11f) <
                     Box(Modifier.clickable(onClickLabel = "Battery usage", onClick = battery)) { InfoLine(Sym.Bolt, s.battery, sub) }
                     Spacer(Modifier.weight(1f))
                     // Side-by-side single-line pills (same card height as online; never mid-word wrap).
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Pill("Reconnect", AppTheme.accentColor(), Color.White, reconnect)
-                        Pill("Hotspot", Color.Transparent, fg, hotspot, outline = true)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Reconnect", AppTheme.accentColor(), Color.White, reconnect, fill = true, modifier = Modifier.weight(1f))
+                        Pill("Hotspot", Color.Transparent, fg, hotspot, outline = true, fill = true, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -230,15 +242,15 @@ private fun Color.luminanceLow() = (red * 0.3f + green * 0.59f + blue * 0.11f) <
     Text(text, style = MaterialTheme.typography.labelLarge, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
-@Composable private fun Pill(text: String, bg: Color, fg: Color, onClick: () -> Unit, outline: Boolean = false, fill: Boolean = false) =
+@Composable private fun Pill(text: String, bg: Color, fg: Color, onClick: () -> Unit, outline: Boolean = false, fill: Boolean = false, modifier: Modifier = Modifier) =
     Text(
         text,
-        Modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier)
+        modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier)
             .clip(CircleShape).background(bg)
             .then(if (outline) Modifier.border(1.5.dp, fg.copy(alpha = 0.45f), CircleShape) else Modifier)
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold), color = fg,
-        maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
+        maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
         textAlign = if (fill) TextAlign.Center else TextAlign.Start,
     )
 

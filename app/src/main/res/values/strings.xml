@@ -16,6 +16,8 @@
     <string name="t_aichats">AI chats</string>
     <string name="t_ai_usage">AI usage</string>
     <string name="t_usage_page">Usage</string>
+    <string name="t_profile">Profile</string>
+    <string name="t_character">Character</string>
     <string name="t_card">Hi! profiles</string>
     <string name="t_menu">BF menu</string>
     <string name="t_file">Recordings</string>

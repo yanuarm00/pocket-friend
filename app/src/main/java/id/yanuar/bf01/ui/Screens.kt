@@ -525,10 +525,17 @@ fun notifAccessGranted(ctx: android.content.Context): Boolean =
         val rev by hub.revision.collectAsState(); val shownName = remember(rev) { p.deviceName.ifBlank { "BF" } }
         if (renaming) RenameDeviceDialog(shownName, { DeviceRename.apply(hub, it); renaming = false }) { renaming = false }
         if (theming) ThemeDialog(AppTheme.mode, { AppTheme.set(it) }) { theming = false }
-        SettingsContent(owner, "Name, avatar, Say Hi · backup on", { open(Screen.Kartu) },
+        val backupSub = if (p.backupOn) "backup on" else "backup off"
+        val charSub = when (p.charMode) {
+            1 -> "Photo · private 8-bit"
+            2 -> "AI 8-bit"
+            else -> "Ready one · photo · AI"
+        }
+        SettingsContent(owner, "Name, avatar, Say Hi · $backupSub", { open(Screen.Profile) },
             device = listOf(
                 SetRow(Sym.Edit, "Device name", shownName, { renaming = true }),
-                SetRow(Sym.Apps, "Character", "Menu, faces & order on $name", { open(Screen.Menu) }, accent = Pop.Orange, deviceThumb = true),
+                SetRow(Sym.Apps, "Character", charSub, { open(Screen.Character) }, accent = Pop.Orange, deviceThumb = true),
+                SetRow(Sym.DeveloperBoard, "BF menu", "Items & order on $name", { open(Screen.Menu) }),
                 SetRow(Sym.Link, "Connection", if (ready) (if (ssid.isNotBlank()) "Wi-Fi \u201c$ssid\u201d" else "Bluetooth · connected") else linkLabel(linked, st),
                     { open(Screen.SetJaringan) }, chip = "Help", onChip = { help = !help }),
                 SetRow(Sym.Download, "Software update", "$name $fwHave" + if (fwNew) " · $fwAvail available" else " · up to date", { open(Screen.SetFirmware) },

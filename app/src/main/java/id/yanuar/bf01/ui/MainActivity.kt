@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -33,7 +34,8 @@ enum class Screen(@androidx.annotation.StringRes val title: Int) {
     Kartu(R.string.t_card), Menu(R.string.t_menu), File(R.string.t_file), Pengaturan(R.string.nav_settings),
     SetAi(R.string.t_ai), SetSuara(R.string.t_voice), SetJaringan(R.string.t_network), SetIzin(R.string.t_perms),
     SetPerangkat(R.string.t_device), SetPemakaian(R.string.t_usage), SetFirmware(R.string.t_firmware), AiChats(R.string.t_aichats), AiUsage(R.string.t_ai_usage), Usage(R.string.t_usage_page),
-    Search(R.string.t_search), Onboard(R.string.t_onboard), Privacy(R.string.t_privacy), ConnHelp(R.string.t_conn_help), ThemeBoard(R.string.t_theme)
+    Search(R.string.t_search), Onboard(R.string.t_onboard), Privacy(R.string.t_privacy), ConnHelp(R.string.t_conn_help), ThemeBoard(R.string.t_theme),
+    Profile(R.string.t_profile), Character(R.string.t_character)
 }
 
 /** Tumpukan layar sederhana untuk tombol/gesture kembali.
@@ -84,7 +86,10 @@ class MainActivity : ComponentActivity() {
         }
         launcher.launch(perms)
         val hub = Hub.get(this)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+        )
         id.yanuar.bf01.svc.AppUpdate.autoCheck(this)
         id.yanuar.bf01.svc.UpdateCheckWorker.schedule(this)   // about once a day, in the background
         handleUpdateIntent(intent)
@@ -126,7 +131,7 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
     val hazeOk = LocalView.current.isHardwareAccelerated
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        topBar = { if (screen !in setOf(Screen.Beranda, Screen.Catatan, Screen.Tugas, Screen.Ngobrol, Screen.Pengaturan, Screen.AiChats, Screen.Search, Screen.Onboard, Screen.Kartu, Screen.SetFirmware))
+        topBar = { if (screen !in setOf(Screen.Beranda, Screen.Catatan, Screen.Tugas, Screen.Ngobrol, Screen.Pengaturan, Screen.AiChats, Screen.Search, Screen.Onboard, Screen.Kartu, Screen.SetFirmware, Screen.Profile, Screen.Character))
             TopAppBar(title = {
                 if (isTab) Column {  // v0.4.1: v5.13 header (big title + one-line subtitle) instead of the old dot-matrix bar
                     if (screen != Screen.Pengaturan) Text(stringResource(screen.title), style = MaterialTheme.typography.headlineMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
@@ -142,7 +147,8 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
         },
-        // Nav floats over content (drawn below); no solid reserved bar.
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets.statusBars, // no nav-bar inset slab under the floating pill
         bottomBar = {},
 ) { pad ->
         // No bottom PopNavClearance here — content must scroll UNDER the frosted nav.
@@ -158,6 +164,8 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
                 Screen.Ngobrol -> NgobrolScreen(hub)
                 Screen.Kartu -> ProfilesScreen(hub)
                 Screen.Menu -> MenuScreen(hub)
+                Screen.Profile -> ProfileScreen(hub, back = { nav.back() }, open = { nav.open(it) })
+                Screen.Character -> CharacterScreen(hub, back = { nav.back() })
                 Screen.File -> FileScreen(hub)
                 Screen.Pengaturan -> PengaturanScreen(hub, open = { nav.open(it) }, onStatus = { sheet = true })
                 Screen.SetAi -> SetAiScreen(hub)

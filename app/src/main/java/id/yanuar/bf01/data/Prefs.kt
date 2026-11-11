@@ -119,6 +119,11 @@ class Prefs(ctx: Context, secureOverride: SharedPreferences? = null) {
     var persona: String get() = (plain.getString("persona", DEFAULT_PERSONA) ?: DEFAULT_PERSONA).let { if (it.startsWith("Kamu BF, sahabat dekat")) DEFAULT_PERSONA else it }; set(v) = plain.edit().putString("persona", v).apply()
 
     var cardName: String get() = plain.getString("c_name", "Alex") ?: "Alex"; set(v) = plain.edit().putString("c_name", v).apply()
+    /** Local notes & to-dos backup on this phone (no account). */
+    var backupOn: Boolean get() = plain.getBoolean("backup_on", true); set(v) = plain.edit().putBoolean("backup_on", v).apply()
+    /** 0 = ready preset, 1 = photo, 2 = AI. */
+    var charMode: Int get() = plain.getInt("char_mode", 0).coerceIn(0, 2); set(v) = plain.edit().putInt("char_mode", v.coerceIn(0, 2)).apply()
+    var charFace: Int get() = plain.getInt("char_face", 0).coerceIn(0, 3); set(v) = plain.edit().putInt("char_face", v.coerceIn(0, 3)).apply()
     var cardTitle: String get() = plain.getString("c_title", "") ?: ""; set(v) = plain.edit().putString("c_title", v).apply()
     var cardPhone: String get() = plain.getString("c_phone", "") ?: ""; set(v) = plain.edit().putString("c_phone", v).apply()
     var cardMsg: String get() = plain.getString("c_msg", "Hi, I'd like to have a chat") ?: ""; set(v) = plain.edit().putString("c_msg", v).apply()

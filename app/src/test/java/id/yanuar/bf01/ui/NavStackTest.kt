@@ -20,7 +20,7 @@ class NavStackTest {
         n.back(); assertEquals(Screen.Beranda, n.current)
     }
     @Test fun subScreenReturnsToPrevious() {
-        for (sub in listOf(Screen.Pairing, Screen.Kartu, Screen.Menu, Screen.File)) {
+        for (sub in listOf(Screen.Pairing, Screen.Kartu, Screen.Menu, Screen.File, Screen.Profile, Screen.Character)) {
             val n = NavStack(Screen.Beranda); n.tab(Screen.Pengaturan); n.open(sub)
             assertEquals(sub, n.current)
             n.back(); assertEquals(Screen.Pengaturan, n.current)

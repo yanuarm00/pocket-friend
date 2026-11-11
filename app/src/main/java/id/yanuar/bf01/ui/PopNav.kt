@@ -11,7 +11,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -24,8 +23,8 @@ import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 
 /**
- * v0.4.10 bottom bar: frosted dark pill that FLOATS over content with real
- * backdrop blur (Chris Bane Haze 1.5). Content scrolls underneath. Separate orange Ask FAB.
+ * Floating pill + Ask FAB over the page background. Blur/glass lives only
+ * inside the clipped CircleShape pill — never a full-width band or fade.
  */
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable fun PopNavBar(screen: Screen, isTab: Boolean, hazeState: HazeState? = null, go: (Screen) -> Unit) {
@@ -39,48 +38,41 @@ import dev.chrisbanes.haze.materials.HazeMaterials
     val frost = if (hazeState != null) {
         Modifier.hazeEffect(state = hazeState, style = style)
     } else Modifier
-    Column(Modifier.fillMaxWidth()) {
-        Box(
-            Modifier.fillMaxWidth().height(20.dp).background(
-                Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.04f))),
-            ),
-        )
+    Row(
+        Modifier.fillMaxWidth().navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Row(
-            Modifier.fillMaxWidth().navigationBarsPadding()
-                .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+            Modifier.weight(1f).height(64.dp)
+                .shadow(10.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.18f), spotColor = Color.Black.copy(alpha = 0.22f))
+                .clip(CircleShape)
+                .then(frost)
+                .background(Color(0x551C1E21))
+                .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape),
+            horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                Modifier.weight(1f).height(64.dp)
-                    .shadow(10.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.18f), spotColor = Color.Black.copy(alpha = 0.22f))
-                    .clip(CircleShape)
-                    .then(frost)
-                    .background(Color(0x551C1E21))
-                    .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                items.forEach { (s, icon, label) ->
-                    val sel = s == screen || (!isTab && s == Screen.Pengaturan)
-                    Box(
-                        Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Tab) { go(s) }
-                            .semantics { contentDescription = label; selected = sel },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(icon, null, Modifier.size(26.dp), tint = if (sel) Pop.Yellow else Color(0xFFD0CDD8))
-                    }
+            items.forEach { (s, icon, label) ->
+                val sel = s == screen || (!isTab && s == Screen.Pengaturan)
+                Box(
+                    Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Tab) { go(s) }
+                        .semantics { contentDescription = label; selected = sel },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, null, Modifier.size(26.dp), tint = if (sel) Pop.Yellow else Color(0xFFD0CDD8))
                 }
             }
-            Spacer(Modifier.width(12.dp))
-            val on = screen == Screen.Ngobrol
-            Box(
-                Modifier.size(72.dp).shadow(12.dp, CircleShape).clip(CircleShape).background(Pop.Orange)
-                    .clickable(role = Role.Tab) { go(Screen.Ngobrol) }
-                    .semantics { contentDescription = "Ask"; selected = on },
-                contentAlignment = Alignment.Center,
-            ) {
-                BfFace(30.dp, BfMood.Senyum, true, color = if (on) Color.White else Pop.Ink)
-            }
+        }
+        Spacer(Modifier.width(12.dp))
+        val on = screen == Screen.Ngobrol
+        Box(
+            Modifier.size(72.dp).shadow(12.dp, CircleShape).clip(CircleShape).background(Pop.Orange)
+                .clickable(role = Role.Tab) { go(Screen.Ngobrol) }
+                .semantics { contentDescription = "Ask"; selected = on },
+            contentAlignment = Alignment.Center,
+        ) {
+            BfFace(30.dp, BfMood.Senyum, true, color = if (on) Color.White else Pop.Ink)
         }
     }
 }

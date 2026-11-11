@@ -16,8 +16,8 @@ android {
         applicationId = "id.yanuarmoo.pocketfriend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 49
-        versionName = "0.4.10"
+        versionCode = 50
+        versionName = "0.4.11"
     }
     // Signing rilis: dibaca dari env (PF_KEYSTORE, PF_KEYSTORE_PASSWORD, PF_KEY_ALIAS, PF_KEY_PASSWORD)
     // atau dari local.properties (pf.keystore, pf.keystorePassword, pf.keyAlias, pf.keyPassword). Rahasia TIDAK di repo.
