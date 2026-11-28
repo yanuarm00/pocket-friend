@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="docs/img/logo.png" alt="Pocket Friend" width="160" height="160">
+</p>
+
+<p align="center">
   <img src="docs/img/hero.png" alt="Pocket Friend: the Android app for BF-01, a pocket-sized e-ink companion" width="100%">
 </p>
 
