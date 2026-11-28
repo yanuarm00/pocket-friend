@@ -35,7 +35,7 @@ enum class Screen(@androidx.annotation.StringRes val title: Int) {
     SetAi(R.string.t_ai), SetSuara(R.string.t_voice), SetJaringan(R.string.t_network), SetIzin(R.string.t_perms),
     SetPerangkat(R.string.t_device), SetPemakaian(R.string.t_usage), SetFirmware(R.string.t_firmware), AiChats(R.string.t_aichats), AiUsage(R.string.t_ai_usage), Usage(R.string.t_usage_page),
     Search(R.string.t_search), Onboard(R.string.t_onboard), Privacy(R.string.t_privacy), ConnHelp(R.string.t_conn_help), ThemeBoard(R.string.t_theme),
-    Profile(R.string.t_profile), Character(R.string.t_character)
+    Profile(R.string.t_profile), Character(R.string.t_character), ToSort(R.string.t_to_sort), ErrorReport(R.string.t_error_report)
 }
 
 /** Tumpukan layar sederhana untuk tombol/gesture kembali.
@@ -183,6 +183,8 @@ fun App(hub: Hub, initial: Screen? = null, sheetOpen: Boolean = false) {
                 Screen.AiChats -> AiChatsScreen(hub)
                 Screen.AiUsage -> AiUsageScreen(hub)
                 Screen.Usage -> UsageScreen(hub)
+                Screen.ToSort -> ToSortScreen(hub)
+                Screen.ErrorReport -> ErrorReportScreen(hub)
             } }
         }
     }

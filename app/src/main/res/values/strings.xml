@@ -106,4 +106,6 @@
     <string name="t_privacy">Privacy &amp; data</string>
     <string name="t_conn_help">Connection help</string>
     <string name="t_theme">Theme</string>
+    <string name="t_to_sort">To sort</string>
+    <string name="t_error_report">Error report</string>
 </resources>

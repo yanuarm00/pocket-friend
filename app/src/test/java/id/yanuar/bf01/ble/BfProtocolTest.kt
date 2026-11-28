@@ -93,4 +93,17 @@ class BfProtocolTest {
         assertTrue(l[1].synced)
         assertTrue(BfProtocol.parseNotesJson("").isEmpty())
     }
+    @Test fun laterEventOurFirmware() {
+        assertEquals(BfProtocol.Event.NoteLater("VN_20261128_101500.wav"), BfProtocol.parseEvent("note:later:VN_20261128_101500.wav"))
+    }
+    @Test fun laterEventClaudeSpellingIsAccepted() {
+        assertEquals(BfProtocol.Event.NoteLater("VN_1.wav"), BfProtocol.parseEvent("later:VN_1.wav"))
+    }
+    @Test fun noteNewIsNotLater() {
+        assertEquals(BfProtocol.Event.NoteNew("VN_1.wav"), BfProtocol.parseEvent("note:new:VN_1.wav"))
+    }
+    @Test fun unsortedNotesJsonKeepsType() {
+        val l = BfProtocol.parseNotesJson("""{"notes":[{"name":"VN_1.wav","size":64000,"duration":2,"type":"UNSORTED","synced":false}]}""")
+        assertEquals(BfProtocol.TYPE_UNSORTED, l.single().type)
+    }
 }

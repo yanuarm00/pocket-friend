@@ -255,12 +255,17 @@ object BfProtocol {
             else RemoteNote(n, o.optLong("size"), o.optInt("duration"), o.optString("type", "PENDING").uppercase(), o.optBoolean("synced")) } }
     }
 
+    /** HTTP /notes type (and Db note type) of a recording BF saved as "Later" (no choice made). */
+    const val TYPE_UNSORTED = "UNSORTED"
+
     sealed class Event {
         data class Media(val cmd: String) : Event()
         object ReminderOk : Event(); object ReminderSnooze : Event()
         data class ReminderFired(val epoch: Long) : Event()
         object TaskStart : Event()
         data class NoteNew(val file: String) : Event()
+        /** Firmware 0.4.2+: no choice made on BF, so the recording waits in "To sort". `later:<file>` is the Claude-firmware spelling. */
+        data class NoteLater(val file: String) : Event()
         /** Firmware v0.2.0+: rekaman dipilih jadi TASK di layar NOTE/TASK. */
         data class TaskNew(val file: String) : Event()
         /** v0.3.9.7: AI voice chat from BF (new thread / reply), seen, to-do confirm, settings ack. */
@@ -297,6 +302,8 @@ object BfProtocol {
             s.startsWith("reminder:fired:") -> Event.ReminderFired(s.removePrefix("reminder:fired:").toLongOrNull() ?: 0)
             s == "task:start" -> Event.TaskStart
             s.startsWith("note:new:") -> Event.NoteNew(s.removePrefix("note:new:"))
+            s.startsWith("note:later:") -> Event.NoteLater(s.removePrefix("note:later:"))
+            s.startsWith("later:") -> Event.NoteLater(s.removePrefix("later:"))
             s.startsWith("note:deleted:") -> Event.NoteDeleted(s.removePrefix("note:deleted:"))
             s.startsWith("task:new:") -> Event.TaskNew(s.removePrefix("task:new:"))
             s.startsWith("ai:new:") -> Event.AiNew(s.removePrefix("ai:new:"))

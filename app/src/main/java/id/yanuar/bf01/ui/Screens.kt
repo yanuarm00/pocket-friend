@@ -107,6 +107,7 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
     val rev by hub.revision.collectAsState(); val notes = rememberLoaded(hub, "notes", rev) { hub.db.notes() }
     var q by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     // Filter hanya dihitung saat input/kumpulan data berubah, bukan tiap ketikan karakter lain direkomposisi.
+    val toSortCount = notes?.count { it.type == id.yanuar.bf01.ble.BfProtocol.TYPE_UNSORTED } ?: 0
     val shown = remember(notes, q) { (notes ?: emptyList()).filter { it.type == "NOTE" }.filter { q.isBlank() || (it.transcript + it.summary + it.tags + it.file).contains(q, true) } }
     // v0.3.9.8.9: tap a card to read the whole transcript (cards stay at 3 lines)
     var openFile by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
@@ -134,7 +135,8 @@ private val fmtNote = SimpleDateFormat("dd/MM HH.mm", Locale.US)
                 if (playing == f) playing = null else { playing = f
                     player = runCatching { android.media.MediaPlayer().apply { setDataSource(n.localPath); setOnCompletionListener { it.release(); player = null; playing = null }; prepare(); start() } }.getOrNull()
                     if (player == null) playing = null } },
-            onShowHow = { how = true }, syncLine = { SyncStatusLine(hub) }, onOpenSearch = { hub.openScreen?.invoke(Screen.Search) })
+            onShowHow = { how = true }, syncLine = { SyncStatusLine(hub) }, onOpenSearch = { hub.openScreen?.invoke(Screen.Search) },
+            toSort = toSortCount, onToSort = { hub.openScreen?.invoke(Screen.ToSort) })
         Spacer(Modifier.height(PopNavClearance))
     }
     if (how) AlertDialog({ how = false }, title = { Text("Save a note") }, text = { Text("Hold the top button on $dev, speak, then let go and pick NOTE. It shows up here with a transcript once $dev syncs.") },
@@ -548,6 +550,7 @@ fun notifAccessGranted(ctx: android.content.Context): Boolean =
                 SetRow(Sym.BarChart, "Usage", "Features, battery & AI cost", { open(Screen.Usage) }),
                 SetRow(Sym.Palette, "Theme", null, { open(Screen.ThemeBoard) }, swatches = true),
                 SetRow(Sym.Shield, "Privacy & data", "Export, clear, audio & chats", { open(Screen.Privacy) }),
+                SetRow(Sym.Error, "Error report", "Read it first, share only if you want", { open(Screen.ErrorReport) }),
             ),
             online = ready,
             connecting = st == id.yanuar.bf01.ble.BleManager.State.CONNECTING || st == id.yanuar.bf01.ble.BleManager.State.SCANNING,
@@ -1019,6 +1022,16 @@ const val CONNECT_HELP = "Can't connect? On BF: open TWEAKS, hold Forget phone, 
     }
 }
 
+/** One bubble in a chat started on BF. */
+@Composable fun ChatBubble(mine: Boolean, text: String, time: String, voice: Boolean) =
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+        Card(Modifier.widthIn(max = 300.dp), colors = CardDefaults.cardColors(if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)) {
+            Column(Modifier.padding(12.dp)) {
+                if (voice) Text("🎤 Voice", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(text, style = MaterialTheme.typography.bodyLarge)
+                Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.End))
+            } } }
+
 /** v0.3.9.7: AI chats started on BF, as WhatsApp-style threads with your voice transcribed. */
 @Composable fun AiChatsScreen(hub: Hub) {
     val rev by hub.revision.collectAsState()
@@ -1027,15 +1040,28 @@ const val CONNECT_HELP = "Can't connect? On BF: open TWEAKS, hold Forget phone, 
     if (open.isNotEmpty()) {
         val msgs = rememberLoaded(hub, "aithread_$open", rev, open) { hub.db.aiThread(open) }
         androidx.activity.compose.BackHandler { open = "" }
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            PfBackHeader("Chat", "Ask BF · kept on this phone", { open = "" })
-            msgs?.forEach { m -> Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.role == "user") Arrangement.End else Arrangement.Start) {
-                Card(Modifier.widthIn(max = 300.dp), colors = CardDefaults.cardColors(if (m.role == "user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)) {
-                    Column(Modifier.padding(12.dp)) {
-                        if (m.role == "user") Text("🎤 Voice", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(m.text, style = MaterialTheme.typography.bodyLarge)
-                        Text(fmtClock.format(Date(m.time)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.End))
-                    } } } }
+        val scope = rememberCoroutineScope(); val scroll = rememberScrollState()
+        var reply by androidx.compose.runtime.saveable.rememberSaveable(open) { mutableStateOf("") }
+        var pending by androidx.compose.runtime.saveable.rememberSaveable(open) { mutableStateOf("") }
+        var err by remember(open) { mutableStateOf("") }; var busy by remember(open) { mutableStateOf(false) }
+        fun send(text: String) { val m = text.trim(); if (m.isEmpty() || busy) return
+            pending = m; reply = ""; err = ""; busy = true
+            scope.launch { try { hub.chatThread(open, m); pending = "" } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { err = id.yanuar.bf01.ai.friendlyError(e) } finally { busy = false } } }
+        LaunchedEffect(msgs?.size, pending, err) { scroll.animateScrollTo(scroll.maxValue) }
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.weight(1f).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                PfBackHeader("Chat", "Ask BF · kept on this phone", { open = "" })
+                msgs?.forEach { m -> ChatBubble(m.role == "user", m.text, fmtClock.format(Date(m.time)), voice = m.role == "user") }
+                if (pending.isNotEmpty()) ChatBubble(true, pending, if (busy) "Sending…" else "Not sent", voice = false)
+                if (busy) Text("BF is thinking…", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 6.dp))
+                if (err.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Couldn't answer: $err", Modifier.weight(1f), color = Pop.Red, style = MaterialTheme.typography.bodyMedium)
+                    PfChip("Retry", true) { send(pending) } }
+            }
+            Spacer(Modifier.height(8.dp))
+            AskInput(reply, { reply = it }, "Reply to BF's chat", { send(reply) })
+            Spacer(Modifier.height(PopNavClearance))
         }
         return
     }

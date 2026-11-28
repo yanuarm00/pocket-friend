@@ -218,6 +218,16 @@ class RecordingSync(private val hub: Hub) {
         if (pending.isNotEmpty()) set(Phase.Done, "Transcribed ${pending.size} recording(s)")
     }
 
+    /** To sort > Make a to-do. Falls back to a plain to-do from the words when the AI is unavailable. */
+    suspend fun makeTodo(file: String, text: String) {
+        if (text.isBlank() || text.startsWith("(")) {
+            val id = hub.db.upsertVoiceTask(file, "Voice to-do", text.takeIf { !it.startsWith("(") }.orEmpty())
+            hub.revision.value++; if (id > 0) hub.scope.launch { runCatching { hub.pushTasks(force = true) } }
+            return
+        }
+        voiceTodo(file, text); hub.db.setNoteProcessed(file)
+    }
+
     /** v0.3.9.7: "beli garam besok jam 5 sore" -> "Buy salt" due tomorrow 17:00; BF asks to confirm (✓/✗). */
     private suspend fun voiceTodo(file: String, text: String) {
         val now = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm EEEE", java.util.Locale.US).format(java.util.Date())

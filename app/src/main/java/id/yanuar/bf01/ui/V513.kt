@@ -96,12 +96,14 @@ data class NoteRowUi(val file: String, val title: String, val sub: String, val d
 
 @Composable fun NotesListContent(rows: List<NoteRowUi>, q: String, onQ: (String) -> Unit, filter: Int, onFilter: (Int) -> Unit,
                                  syncLabel: String?, syncDone: Int, syncTotal: Int, playing: String?, onOpen: (String) -> Unit, onPlay: (String) -> Unit,
-                                 onShowHow: () -> Unit = {}, syncLine: @Composable () -> Unit = {}, onOpenSearch: (() -> Unit)? = null) {
+                                 onShowHow: () -> Unit = {}, syncLine: @Composable () -> Unit = {}, onOpenSearch: (() -> Unit)? = null,
+                                 toSort: Int = 0, onToSort: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PfHeader("Notes", if (rows.isEmpty() && q.isEmpty() && filter == 0) "Everything BF heard." else "Everything BF heard.")
-        if (rows.isEmpty() && q.isEmpty() && filter == 0 && syncLabel == null) { EmptyState(bfBadge = true, icon = null, title = "No notes yet",
+        if (rows.isEmpty() && q.isEmpty() && filter == 0 && syncLabel == null && toSort == 0) { EmptyState(bfBadge = true, icon = null, title = "No notes yet",
             body = "Hold the button on BF to save\nyour first note.", action = "Show me how", onAction = onShowHow); return@Column }
+        if (toSort > 0) ToSortBanner(toSort, onToSort)
         if (onOpenSearch != null) {
             Row(Modifier.fillMaxWidth().height(48.dp).clip(CircleShape).background(cardColor()).clickable(onClick = onOpenSearch).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(androidx.compose.material.icons.Icons.Default.Search, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -125,7 +127,7 @@ data class NoteRowUi(val file: String, val title: String, val sub: String, val d
                     color = Pop.Orange, trackColor = Color.White.copy(alpha = 0.18f), drawStopIndicator = {})
             }
         } else syncLine()
-        if (rows.isEmpty()) Text("Nothing matches.", color = cs.onSurfaceVariant, modifier = Modifier.padding(8.dp))
+        if (rows.isEmpty() && (toSort == 0 || q.isNotEmpty() || filter != 0)) Text("Nothing matches.", color = cs.onSurfaceVariant, modifier = Modifier.padding(8.dp))
         var lastDay = ""
         rows.forEach { r ->
             if (r.day != lastDay) { SectionCap(r.day); lastDay = r.day }

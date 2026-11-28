@@ -33,4 +33,15 @@ class RecordingSyncTest {
         assertEquals("Beli baterai", s); assertEquals("belanja,bf", t); assertEquals("Beli baterai LiPo", ti)
         assertEquals("teks biasa", RecordingSync.parseMeta("teks biasa").first)
     }
+    @Test fun unsortedRecordingsAreDownloadedNotSkipped() {
+        val r = listOf(RemoteNote("VN_5.wav", 9000, 2, "UNSORTED", false))
+        assertEquals(listOf("VN_5.wav"), RecordingSync.toDownload(r, emptySet()).map { it.name })
+    }
+    @Test fun unsortedLeavesToSortOnlyWhenKept() {
+        val db = id.yanuar.bf01.data.Db(androidx.test.core.app.ApplicationProvider.getApplicationContext())
+        db.upsertNote("VN_5.wav"); db.setNoteType("VN_5.wav", "UNSORTED"); db.upsertNote("VN_6.wav"); db.setNoteType("VN_6.wav", "NOTE")
+        assertEquals(listOf("VN_5.wav"), db.notes().filter { it.type == "UNSORTED" }.map { it.file })
+        db.setNoteType("VN_5.wav", "NOTE")
+        assertTrue(db.notes().none { it.type == "UNSORTED" })
+    }
 }

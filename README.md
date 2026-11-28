@@ -56,7 +56,7 @@ It started as a hobby project: what if an AI companion was calm, pocket-sized an
 
 Home shows the device, today's tasks and recent recordings. Notes, To-do and Ask BF follow what happens on BF-01. Voice notes you record on the device show up in Notes when the phone connects.
 
-The current app release is Pocket Friend 0.4.11. If you already have it installed, you can update from inside the app.
+The current app release is Pocket Friend 0.4.12. If you already have it installed, you can update from inside the app.
 
 ## A look at the BF-01 screen
 

@@ -69,13 +69,44 @@ class Hub internal constructor(val ctx: Context, val prefs: Prefs = Prefs(ctx)) 
         val search = text.isNotBlank() && id.yanuar.bf01.ai.PlaceSearch.isPlaceQuery(text)
         if (text.isNotBlank()) db.addFeatureUse(if (search) Feature.SEARCH else Feature.ASK)
         val reply = if (text.isBlank()) "I couldn't hear anything. Try again?" else runCatching {
-            withContext(useCtx(search)) { chatProvider(prefs).chat(systemPrompt() + "\nThis chat happens on BF's small screen: reply briefly (2-4 sentences) and always in the same language the user speaks.", history, text) }
+            withContext(useCtx(search)) { chatProvider(prefs).chat(systemPrompt() + BF_SMALL_SCREEN, history, text) }
                 .also { db.addUsage(chat = 1) }
         }.getOrElse { log("AI chat from BF failed: ${friendlyError(it)}"); "(Couldn't answer: ${friendlyError(it)})" }
         db.addChat("assistant", reply, src = "ai:$tid")
         aiPrefs.edit().putBoolean("new_$tid", true).apply()
         revision.value++
         pushChat(tid)
+    }
+
+    // ---------- v0.4.12: To sort (recordings BF saved as "Later") ----------
+    /** Keep the recording as a plain note. */
+    fun keepAsNote(file: String) { db.setNoteType(file, "NOTE"); revision.value++ }
+    /** Turn the recording into a to-do (title and time are read from the words). */
+    suspend fun makeTodoFromNote(file: String) {
+        val text = db.note(file)?.transcript.orEmpty()
+        db.setNoteType(file, "TASK")
+        recordings.makeTodo(file, text)
+    }
+    /** Ask the AI about the recording. The answer lands in the Ask chats and is sent to BF like a chat started there. */
+    suspend fun askFromNote(file: String) {
+        val text = db.note(file)?.transcript.orEmpty()
+        db.setNoteType(file, "AI")
+        aiPrefs.edit().putString("tid_$file", aiTidOf(file)).apply()
+        db.setNoteProcessed(file)
+        answerAi(file, text)
+    }
+
+    /** Reply typed on the phone inside a chat that started on BF. Saved with the reply, then the thread goes back to BF (Notify H). */
+    suspend fun chatThread(tid: String, text: String): String = withContext(Dispatchers.IO) {
+        val history = db.aiThread(tid).takeLast(12).map { (if (it.role == "user") "user" else "assistant") to it.text }
+        val reply = try { chatProvider(prefs).chat(systemPrompt() + BF_SMALL_SCREEN, history, text) }
+            catch (e: CancellationException) { throw e } catch (e: Exception) { log("Reply in BF chat failed (${chatLabel(prefs)}): ${friendlyError(e)}"); throw e }
+        db.addFeatureUse(Feature.ASK); db.addUsage(chat = 1)
+        db.addChat("user", text, src = "ai:$tid"); db.addChat("assistant", reply, src = "ai:$tid")
+        aiPrefs.edit().putBoolean("new_$tid", true).apply()
+        revision.value++
+        runCatching { pushChat(tid) }
+        reply
     }
     /** "Tomorrow 17:00" style label for a due time; empty for no due time (BF shows Today). */
     fun whenLabel(due: Long): String {
@@ -407,6 +438,7 @@ class Hub internal constructor(val ctx: Context, val prefs: Prefs = Prefs(ctx)) 
             is BfProtocol.Event.Media -> mediaCommand?.invoke(e.cmd)
             is BfProtocol.Event.TaskStart -> nextIsTask = true
             is BfProtocol.Event.NoteNew -> { db.addFeatureUse(Feature.VOICE_NOTE); db.setNoteType(e.file, "NOTE"); revision.value++; recordings.request() }
+            is BfProtocol.Event.NoteLater -> { db.addFeatureUse(Feature.VOICE_NOTE); db.setNoteType(e.file, BfProtocol.TYPE_UNSORTED); revision.value++; recordings.request() }
             is BfProtocol.Event.TaskNew -> { db.addFeatureUse(Feature.TODO); addVoiceTask(e.file); recordings.request() }
             is BfProtocol.Event.NoteDeleted -> {
                 val al = ctx.getSharedPreferences("rec_alias", Context.MODE_PRIVATE)   // 0.3.9.8.6: VN_1970 files are saved under phone time
@@ -433,6 +465,7 @@ class Hub internal constructor(val ctx: Context, val prefs: Prefs = Prefs(ctx)) 
     }
 
     companion object {
+        const val BF_SMALL_SCREEN = "\nThis chat happens on BF's small screen: reply briefly (2-4 sentences) and always in the same language the user speaks."
         @Volatile private var inst: Hub? = null
         fun get(ctx: Context): Hub = inst ?: synchronized(this) { inst ?: Hub(ctx.applicationContext).also { inst = it } }
     }
